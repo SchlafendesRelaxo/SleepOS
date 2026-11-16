@@ -15,6 +15,9 @@ public interface ISystemMonitorService
 [SupportedOSPlatform("windows")]
 public sealed class SystemMonitorService : ISystemMonitorService
 {
+    private readonly object _processSamplesLock = new();
+    private readonly Dictionary<int, (TimeSpan CpuTime, DateTime SampledAt)> _processCpuSamples = [];
+
     public SystemMetrics Capture()
     {
         var memory = GetMemoryUsage();
@@ -179,7 +182,7 @@ public sealed class SystemMonitorService : ISystemMonitorService
 
     private static double ToMegabitsPerSecond(double bytesPerSecond) => bytesPerSecond * 8d / (1024d * 1024d);
 
-    private static IReadOnlyList<ProcessPerformance> GetProcesses()
+    private IReadOnlyList<ProcessPerformance> GetProcesses()
     {
         var processes = new List<ProcessPerformance>();
         foreach (var process in Process.GetProcesses())
@@ -210,10 +213,87 @@ public sealed class SystemMonitorService : ISystemMonitorService
             }
         }
 
-        return processes
+        var topProcesses = processes
             .OrderByDescending(process => process.MemoryMb)
             .Take(8)
             .ToArray();
+        var observedProcessIds = topProcesses.Select(process => process.ProcessId).ToHashSet();
+        foreach (var snapshot in topProcesses)
+        {
+            try
+            {
+                using var process = Process.GetProcessById(snapshot.ProcessId);
+                if (!string.Equals(process.ProcessName, snapshot.Name, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                snapshot.CpuUsagePercent = GetProcessCpuUsage(process);
+                snapshot.Priority = GetProcessPriority(process);
+                snapshot.HasVisibleWindow = process.MainWindowHandle != IntPtr.Zero;
+            }
+            catch (System.ComponentModel.Win32Exception)
+            {
+                // A process may become inaccessible after the initial scan.
+            }
+            catch (InvalidOperationException)
+            {
+                // A process can exit before the selected metrics are read.
+            }
+            catch (ArgumentException)
+            {
+                // A process can exit before its PID is reopened.
+            }
+        }
+
+        lock (_processSamplesLock)
+        {
+            foreach (var processId in _processCpuSamples.Keys.Where(processId => !observedProcessIds.Contains(processId)).ToArray())
+            {
+                _processCpuSamples.Remove(processId);
+            }
+        }
+
+        return topProcesses;
+    }
+
+    private double? GetProcessCpuUsage(Process process)
+    {
+        var now = DateTime.UtcNow;
+        var cpuTime = process.TotalProcessorTime;
+        lock (_processSamplesLock)
+        {
+            if (_processCpuSamples.TryGetValue(process.Id, out var previous) && now > previous.SampledAt)
+            {
+                var elapsed = (now - previous.SampledAt).TotalMilliseconds;
+                var cpuMilliseconds = (cpuTime - previous.CpuTime).TotalMilliseconds;
+                _processCpuSamples[process.Id] = (cpuTime, now);
+                return Math.Clamp(cpuMilliseconds / elapsed / Environment.ProcessorCount * 100d, 0d, 100d);
+            }
+
+            _processCpuSamples[process.Id] = (cpuTime, now);
+            return null;
+        }
+    }
+
+    private static string GetProcessPriority(Process process)
+    {
+        try
+        {
+            return process.PriorityClass.ToString();
+        }
+        catch (System.ComponentModel.Win32Exception)
+        {
+            return "Unavailable";
+        }
+        catch (InvalidOperationException)
+        {
+            return "Unavailable";
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return "Unavailable";
+        }
     }
 
     [DllImport("kernel32.dll", SetLastError = true)]

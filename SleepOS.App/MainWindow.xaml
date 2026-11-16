@@ -1,10 +1,12 @@
 ﻿<Window x:Class="SleepOS.App.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:local="clr-namespace:SleepOS.App"
         Title="SleepOS" Height="900" Width="1380" MinHeight="700" MinWidth="1000"
         Background="{DynamicResource BackgroundBrush}" WindowStyle="None" AllowsTransparency="True" ResizeMode="CanResize"
         PreviewKeyDown="MainWindow_PreviewKeyDown">
     <Window.Resources>
+        <local:ExecutableIconConverter x:Key="ExecutableIconConverter"/>
         <SolidColorBrush x:Key="BackgroundBrush" Color="#09090D"/>
         <SolidColorBrush x:Key="PanelBrush" Color="#111119"/>
         <SolidColorBrush x:Key="CardBrush" Color="#15151F"/>
@@ -707,7 +709,7 @@
                         <ScrollViewer VerticalScrollBarVisibility="Hidden" Background="{DynamicResource BackgroundBrush}">
                             <StackPanel Margin="30,28,30,34">
                                 <TextBlock Text="Optimizer" Foreground="{DynamicResource TextBrush}" FontSize="28" FontWeight="Bold"/>
-                                <TextBlock Text="Choose one of SleepOS's two Windows power-plan options. No other tweaks or FPS boost are promised."
+                                <TextBlock Text="Use SleepOS performance policies and optionally switch between the two built-in Windows power plans."
                                            Foreground="{DynamicResource MutedBrush}" FontSize="13" Margin="0,7,0,22"/>
                                 <Border Style="{StaticResource HeroCard}" Margin="0,0,0,18">
                                     <Grid>
@@ -726,6 +728,39 @@
                                         <TextBlock Grid.Column="1" Text="Check this plan again after switching."
                                                    Foreground="{DynamicResource MutedBrush}" FontSize="11"
                                                    VerticalAlignment="Center" Margin="18,0,0,0"/>
+                                    </Grid>
+                                </Border>
+                                <Border Style="{StaticResource CardStyle}" Margin="0,0,0,14">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel>
+                                            <TextBlock Text="Measured performance benchmark" Style="{StaticResource SectionTitle}" FontSize="17"/>
+                                            <TextBlock Text="{Binding BenchmarkStatus}" Foreground="{DynamicResource MutedBrush}"
+                                                       Margin="0,6,16,0" TextWrapping="Wrap"/>
+                                            <ItemsControl ItemsSource="{Binding BenchmarkHistory}">
+                                                <ItemsControl.ItemTemplate>
+                                                    <DataTemplate>
+                                                        <TextBlock Foreground="{DynamicResource MutedBrush}" FontSize="10" Margin="0,4,0,0">
+                                                            <Run Text="{Binding CapturedAt, StringFormat={}{0:yyyy-MM-dd HH:mm:ss}}"/>
+                                                            <Run Text=" • CPU "/>
+                                                            <Run Text="{Binding CpuUsagePercent, StringFormat={}{0:F1}%}"/>
+                                                            <Run Text=" • RAM "/>
+                                                            <Run Text="{Binding RamUsedGb, StringFormat={}{0:F2} GB}"/>
+                                                            <Run Text=" • Background "/>
+                                                            <Run Text="{Binding BackgroundProcessCount}"/>
+                                                            <Run Text=" • Uninspected "/>
+                                                            <Run Text="{Binding UninspectedProcessCount}"/>
+                                                        </TextBlock>
+                                                    </DataTemplate>
+                                                </ItemsControl.ItemTemplate>
+                                            </ItemsControl>
+                                        </StackPanel>
+                                        <Button Grid.Column="1" Content="Capture reading" Style="{StaticResource ActionButton}"
+                                                Command="{Binding CapturePerformanceBenchmarkCommand}" VerticalAlignment="Top"
+                                                Background="{DynamicResource AccentBrush}" BorderBrush="{DynamicResource AccentBrush}"/>
                                     </Grid>
                                 </Border>
                                 <ItemsControl ItemsSource="{Binding Profiles}">
@@ -809,6 +844,51 @@
                                         <ComboBox Grid.Column="1" Width="150" Style="{StaticResource SleepOSComboBox}"
                                                   ItemsSource="{Binding PerformanceModeOptions}"
                                                   SelectedItem="{Binding PerformanceMode, Mode=TwoWay}"/>
+                                    </Grid>
+                                </Border>
+                                <Border Style="{StaticResource CardStyle}" Margin="0,0,0,12">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel VerticalAlignment="Center">
+                                            <TextBlock Text="Automatic Memory Saver" Foreground="{DynamicResource TextBrush}" FontWeight="SemiBold"/>
+                                            <TextBlock Text="Uses EcoQoS only for explicitly managed, visible apps after their own inactivity delay and when the selected profile's CPU or memory threshold is reached."
+                                                       Foreground="{DynamicResource MutedBrush}" FontSize="11" TextWrapping="Wrap" Margin="0,4,12,0"/>
+                                        </StackPanel>
+                                        <Button Grid.Column="1" Content="{Binding AutomaticMemorySaverEnabled, StringFormat=Toggle (currently {0})}"
+                                                Style="{StaticResource ActionButton}" Command="{Binding ToggleAutomaticMemorySaverCommand}"/>
+                                    </Grid>
+                                </Border>
+                                <Border Style="{StaticResource CardStyle}" Margin="0,0,0,12">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel VerticalAlignment="Center">
+                                            <TextBlock Text="Automatic gaming profile" Foreground="{DynamicResource TextBrush}" FontWeight="SemiBold"/>
+                                            <TextBlock Text="Detects known running games and temporarily uses the gaming background policy for apps you selected. Previous efficiency policies are restored after the game exits."
+                                                       Foreground="{DynamicResource MutedBrush}" FontSize="11" TextWrapping="Wrap" Margin="0,4,12,0"/>
+                                        </StackPanel>
+                                        <Button Grid.Column="1" Content="{Binding AutomaticGamingModeEnabled, StringFormat=Toggle (currently {0})}"
+                                                Style="{StaticResource ActionButton}" Command="{Binding ToggleAutomaticGamingModeCommand}"/>
+                                    </Grid>
+                                </Border>
+                                <Border Style="{StaticResource CardStyle}" Margin="0,0,0,12">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel VerticalAlignment="Center">
+                                            <TextBlock Text="High CPU analysis" Foreground="{DynamicResource TextBrush}" FontWeight="SemiBold"/>
+                                            <TextBlock Text="When a total-CPU reading reaches 85%, inspect eligible processes and report the highest measured consumers. This analysis does not kill or reprioritize them."
+                                                       Foreground="{DynamicResource MutedBrush}" FontSize="11" TextWrapping="Wrap" Margin="0,4,12,0"/>
+                                        </StackPanel>
+                                        <Button Grid.Column="1" Content="{Binding AutomaticHighCpuAnalysisEnabled, StringFormat=Toggle (currently {0})}"
+                                                Style="{StaticResource ActionButton}" Command="{Binding ToggleAutomaticHighCpuAnalysisCommand}"/>
                                     </Grid>
                                 </Border>
                                 <Border Style="{StaticResource CardStyle}" Margin="0,0,0,12">
@@ -928,6 +1008,45 @@
                                         </ItemsControl>
                                     </StackPanel>
                                 </Border>
+                                <Border Style="{StaticResource CardStyle}" Margin="0,0,0,14">
+                                    <StackPanel>
+                                        <TextBlock Text="Game performance profiles" Style="{StaticResource SectionTitle}" FontSize="17"/>
+                                        <TextBlock Text="{Binding GameProfileStatus}" Foreground="{DynamicResource MutedBrush}"
+                                                   TextWrapping="Wrap" Margin="0,6,0,10"/>
+                                        <ItemsControl ItemsSource="{Binding GameProcessProfiles}">
+                                            <ItemsControl.ItemTemplate>
+                                                <DataTemplate>
+                                                    <Border Background="{DynamicResource ListBrush}" BorderBrush="{DynamicResource LineBrush}"
+                                                            BorderThickness="1" CornerRadius="9" Padding="10" Margin="0,0,0,7">
+                                                        <Grid>
+                                                            <Grid.ColumnDefinitions>
+                                                                <ColumnDefinition Width="*"/>
+                                                                <ColumnDefinition Width="Auto"/>
+                                                                <ColumnDefinition Width="Auto"/>
+                                                            </Grid.ColumnDefinitions>
+                                                            <StackPanel>
+                                                                <CheckBox Content="{Binding ProcessName}" IsChecked="{Binding Enabled, Mode=TwoWay}"
+                                                                          Style="{StaticResource ProcessCheckBox}" FontWeight="SemiBold"/>
+                                                                <TextBlock Text="{Binding ExecutablePath}" Foreground="{DynamicResource MutedBrush}"
+                                                                           FontSize="10" TextTrimming="CharacterEllipsis" ToolTip="{Binding ExecutablePath}"
+                                                                           Margin="22,3,8,0"/>
+                                                            </StackPanel>
+                                                            <ComboBox Grid.Column="1" Width="150" Style="{StaticResource SleepOSComboBox}"
+                                                                      ItemsSource="{Binding DataContext.GamePerformanceModeOptions, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                                      SelectedItem="{Binding PerformanceMode, Mode=TwoWay}"/>
+                                                            <Button Grid.Column="2" Content="Remove" Style="{StaticResource ActionButton}"
+                                                                    Margin="8,0,0,0"
+                                                                    Command="{Binding DataContext.RemoveGameProcessProfileCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                                    CommandParameter="{Binding}"/>
+                                                        </Grid>
+                                                    </Border>
+                                                </DataTemplate>
+                                            </ItemsControl.ItemTemplate>
+                                        </ItemsControl>
+                                        <Button Content="Save game profiles" Style="{StaticResource ActionButton}"
+                                                Command="{Binding SaveGameProfilesCommand}" HorizontalAlignment="Left" Margin="0,4,0,0"/>
+                                    </StackPanel>
+                                </Border>
                                 <Border Style="{StaticResource CardStyle}">
                                     <StackPanel>
                                         <TextBlock Text="Top processes by memory" Style="{StaticResource SectionTitle}" FontSize="17"/>
@@ -948,12 +1067,18 @@
                                                             <ColumnDefinition Width="*"/>
                                                             <ColumnDefinition Width="Auto"/>
                                                             <ColumnDefinition Width="Auto"/>
+                                                            <ColumnDefinition Width="Auto"/>
+                                                            <ColumnDefinition Width="Auto"/>
                                                         </Grid.ColumnDefinitions>
                                                         <TextBlock Text="{Binding Name}" Foreground="{DynamicResource TextBrush}"/>
                                                         <TextBlock Grid.Column="1" Text="{Binding ProcessId, StringFormat=PID {0}}"
                                                                    Foreground="{DynamicResource MutedBrush}" Margin="16,0"/>
                                                         <TextBlock Grid.Column="2" Text="{Binding MemoryMb, StringFormat={}{0:F1} MB}"
                                                                    Foreground="{DynamicResource AccentBrush}"/>
+                                                        <TextBlock Grid.Column="3" Text="{Binding CpuUsageText}"
+                                                                   Foreground="{DynamicResource MutedBrush}" Margin="14,0"/>
+                                                        <TextBlock Grid.Column="4" Text="{Binding Priority, StringFormat={}{0} priority}"
+                                                                   Foreground="{DynamicResource MutedBrush}"/>
                                                     </Grid>
                                                 </DataTemplate>
                                             </ListView.ItemTemplate>
@@ -989,6 +1114,55 @@
 
                                 <Border Style="{StaticResource CardStyle}" Margin="0,0,0,14">
                                     <StackPanel>
+                                        <TextBlock Text="Smart Memory Saver" Style="{StaticResource SectionTitle}" FontSize="17"/>
+                                        <TextBlock Text="{Binding MemorySaverStatus}" Foreground="{DynamicResource MutedBrush}"
+                                                   Margin="0,6,0,0" TextWrapping="Wrap"/>
+                                        <TextBlock Text="EcoQoS reduces CPU/power scheduling for opted-in inactive apps; it does not force-release allocated RAM. SleepOS never suspends or terminates apps for Memory Saver."
+                                                   Foreground="{DynamicResource MutedBrush}" FontSize="11" TextWrapping="Wrap" Margin="0,5,0,0"/>
+                                        <StackPanel Orientation="Horizontal" Margin="0,12,0,12">
+                                            <Button Content="Add selected apps" Style="{StaticResource ActionButton}"
+                                                    Command="{Binding AddSelectedToMemorySaverCommand}" Margin="0,0,8,0"/>
+                                            <Button Content="Save rules" Style="{StaticResource ActionButton}"
+                                                    Command="{Binding SaveMemorySaverRulesCommand}"/>
+                                        </StackPanel>
+                                        <ItemsControl ItemsSource="{Binding ManagedApplications}">
+                                            <ItemsControl.ItemTemplate>
+                                                <DataTemplate>
+                                                    <Border Background="{DynamicResource ListBrush}" BorderBrush="{DynamicResource LineBrush}"
+                                                            BorderThickness="1" CornerRadius="9" Padding="10" Margin="0,0,0,7">
+                                                        <Grid>
+                                                            <Grid.ColumnDefinitions>
+                                                                <ColumnDefinition Width="*"/>
+                                                                <ColumnDefinition Width="Auto"/>
+                                                                <ColumnDefinition Width="Auto"/>
+                                                                <ColumnDefinition Width="Auto"/>
+                                                            </Grid.ColumnDefinitions>
+                                                            <StackPanel VerticalAlignment="Center">
+                                                                <CheckBox Content="{Binding ProcessName}" IsChecked="{Binding Enabled, Mode=TwoWay}"
+                                                                          Style="{StaticResource ProcessCheckBox}" FontWeight="SemiBold"/>
+                                                                <TextBlock Text="{Binding ExecutablePath}" Foreground="{DynamicResource MutedBrush}"
+                                                                           FontSize="10" TextTrimming="CharacterEllipsis" ToolTip="{Binding ExecutablePath}"
+                                                                           Margin="22,3,8,0"/>
+                                                            </StackPanel>
+                                                            <TextBlock Grid.Column="1" Text="Idle after" Foreground="{DynamicResource MutedBrush}"
+                                                                       VerticalAlignment="Center" Margin="8,0"/>
+                                                            <ComboBox Grid.Column="2" Width="76" Style="{StaticResource SleepOSComboBox}"
+                                                                      ItemsSource="{Binding DataContext.MemorySaverInactivityOptions, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                                      SelectedItem="{Binding InactivityMinutes, Mode=TwoWay}"/>
+                                                            <Button Grid.Column="3" Content="Remove" Style="{StaticResource ActionButton}"
+                                                                    Margin="8,0,0,0"
+                                                                    Command="{Binding DataContext.RemoveMemorySaverRuleCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                                    CommandParameter="{Binding}"/>
+                                                        </Grid>
+                                                    </Border>
+                                                </DataTemplate>
+                                            </ItemsControl.ItemTemplate>
+                                        </ItemsControl>
+                                    </StackPanel>
+                                </Border>
+
+                                <Border Style="{StaticResource CardStyle}" Margin="0,0,0,14">
+                                    <StackPanel>
                                         <Grid>
                                             <Grid.RowDefinitions>
                                                 <RowDefinition Height="Auto"/>
@@ -1006,15 +1180,25 @@
                                             <StackPanel Grid.Row="1" Grid.ColumnSpan="2" Margin="0,6,0,0">
                                                 <TextBlock Text="Windows-folder processes, Windows services, SleepOS, visible apps, and recognized active games are not suggested. All other hidden apps are listed for review; a hidden process may still be required by another app."
                                                            Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap"/>
-                                                <TextBlock Text="Each row shows its description, publisher metadata, path, PID, and RAM. RAM does not affect the suggestions. Stop selected closes only those PIDs; unsaved work may be lost."
+                                                <TextBlock Text="Rows include description, publisher metadata, path, PID, CPU, RAM, and priority. RAM does not affect suggestions. Stop selected closes only those PIDs; unsaved work may be lost."
                                                            Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" Margin="0,6,0,0"/>
                                             </StackPanel>
                                         </Grid>
-                                        <StackPanel Orientation="Horizontal" Margin="0,16,0,12">
+                                        <WrapPanel Margin="0,16,0,12">
+                                            <Button Content="Add selected to game profiles" Style="{StaticResource ActionButton}"
+                                                    Command="{Binding AddSelectedToGameProfilesCommand}" Margin="0,0,8,8"/>
+                                            <Button Content="Apply EcoQoS" Style="{StaticResource ActionButton}"
+                                                    Command="{Binding ApplyEfficiencyModeToSelectedCommand}" Margin="0,0,8,8"/>
+                                            <Button Content="Restore policy" Style="{StaticResource ActionButton}"
+                                                    Command="{Binding RestoreEfficiencyModeForSelectedCommand}" Margin="0,0,8,8"/>
+                                            <Button Content="Set BelowNormal priority" Style="{StaticResource ActionButton}"
+                                                    Command="{Binding SetSelectedProcessesToBelowNormalCommand}" Margin="0,0,8,8"/>
+                                            <Button Content="Restore priority" Style="{StaticResource ActionButton}"
+                                                    Command="{Binding RestoreSelectedProcessPrioritiesCommand}" Margin="0,0,8,8"/>
                                             <Button Content="Stop selected" Style="{StaticResource ActionButton}"
                                                     Click="StopSelectedProcesses_Click" Background="{DynamicResource DangerBrush}"
                                                     BorderBrush="{DynamicResource DangerBorderBrush}" Foreground="{DynamicResource DangerTextBrush}"/>
-                                        </StackPanel>
+                                        </WrapPanel>
                                         <ListView ItemsSource="{Binding ManageableProcesses}" Background="{DynamicResource ListBrush}"
                                                   BorderBrush="{DynamicResource LineBrush}" BorderThickness="1"
                                                   MaxHeight="390" MinHeight="90">
@@ -1040,11 +1224,15 @@
                                                 <DataTemplate>
                                                     <Grid>
                                                         <Grid.ColumnDefinitions>
+                                                            <ColumnDefinition Width="Auto"/>
                                                             <ColumnDefinition Width="*"/>
                                                             <ColumnDefinition Width="Auto"/>
                                                             <ColumnDefinition Width="Auto"/>
+                                                            <ColumnDefinition Width="Auto"/>
                                                         </Grid.ColumnDefinitions>
-                                                        <StackPanel ToolTip="{Binding ExecutablePath}">
+                                                        <Image Grid.Column="0" Width="32" Height="32" Margin="2,0,10,0"
+                                                               Source="{Binding ExecutablePath, Converter={StaticResource ExecutableIconConverter}}"/>
+                                                        <StackPanel Grid.Column="1" ToolTip="{Binding ExecutablePath}">
                                                             <CheckBox Content="{Binding Name}" IsChecked="{Binding IsSelected, Mode=TwoWay}"
                                                                       Style="{StaticResource ProcessCheckBox}" FontWeight="SemiBold"/>
                                                             <TextBlock Text="{Binding ProductDescription, StringFormat=File info: {0}}"
@@ -1072,11 +1260,19 @@
                                                                        FontSize="10" TextTrimming="CharacterEllipsis" ToolTip="{Binding ExecutablePath}"
                                                                        Margin="22,3,12,0"/>
                                                         </StackPanel>
-                                                        <TextBlock Grid.Column="1" Text="{Binding ProcessId, StringFormat=PID {0}}"
+                                                        <TextBlock Grid.Column="2" Text="{Binding ProcessId, StringFormat=PID {0}}"
                                                                    Foreground="{DynamicResource MutedBrush}" VerticalAlignment="Center" Margin="12,0"/>
-                                                        <TextBlock Grid.Column="2" Text="{Binding MemoryMb, StringFormat={}{0:F1} MB}"
+                                                        <TextBlock Grid.Column="3" Text="{Binding MemoryMb, StringFormat={}{0:F1} MB}"
                                                                    Foreground="{DynamicResource AccentBrush}" VerticalAlignment="Center" MinWidth="72"
                                                                    TextAlignment="Right"/>
+                                                        <StackPanel Grid.Column="4" Margin="12,0,0,0" VerticalAlignment="Center">
+                                                            <TextBlock Text="{Binding CpuUsageText}"
+                                                                       Foreground="{DynamicResource MutedBrush}" FontSize="10"/>
+                                                            <TextBlock Text="{Binding Priority, StringFormat=Priority {0}}"
+                                                                       Foreground="{DynamicResource MutedBrush}" FontSize="10"/>
+                                                            <TextBlock Text="{Binding WindowActivity}"
+                                                                       Foreground="{DynamicResource MutedBrush}" FontSize="10"/>
+                                                        </StackPanel>
                                                     </Grid>
                                                 </DataTemplate>
                                             </ListView.ItemTemplate>
@@ -1438,6 +1634,41 @@
                                         <Button Grid.Column="1" Content="Toggle" Style="{StaticResource ActionButton}"
                                                 Command="{Binding ToggleAutoRefreshCommand}"/>
                                     </Grid>
+                                </Border>
+                                <TextBlock Text="WINDOWS SIGN-IN" Foreground="{DynamicResource MutedBrush}" FontSize="10"
+                                           FontWeight="Bold" Margin="2,8,0,10"/>
+                                <Border Style="{StaticResource CardStyle}" Margin="0,0,0,12">
+                                    <StackPanel>
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="Auto"/>
+                                            </Grid.ColumnDefinitions>
+                                            <StackPanel VerticalAlignment="Center">
+                                                <TextBlock Text="Start SleepOS with Windows" Foreground="{DynamicResource TextBrush}" FontWeight="SemiBold"/>
+                                                <TextBlock Text="{Binding StartupStatus}" Foreground="{DynamicResource MutedBrush}"
+                                                           FontSize="11" TextWrapping="Wrap" Margin="0,4,12,0"/>
+                                            </StackPanel>
+                                            <Button Grid.Column="1" Content="{Binding AutoStartEnabled, StringFormat=Toggle (currently {0})}"
+                                                    Style="{StaticResource ActionButton}" Command="{Binding ToggleAutoStartCommand}"/>
+                                        </Grid>
+                                        <CheckBox Content="Start minimized in the system tray" IsChecked="{Binding StartMinimized, Mode=TwoWay}"
+                                                  Foreground="{DynamicResource TextBrush}" Margin="0,16,0,10"/>
+                                        <Grid IsEnabled="{Binding IsStartupDelayEnabled}">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="Auto"/>
+                                            </Grid.ColumnDefinitions>
+                                            <StackPanel VerticalAlignment="Center">
+                                                <TextBlock Text="Startup delay" Foreground="{DynamicResource TextBrush}" FontWeight="SemiBold"/>
+                                                <TextBlock Text="Delay the launch after Windows sign-in to reduce startup contention."
+                                                           Foreground="{DynamicResource MutedBrush}" FontSize="11" Margin="0,4,12,0"/>
+                                            </StackPanel>
+                                            <ComboBox Grid.Column="1" Width="92" Style="{StaticResource SleepOSComboBox}"
+                                                      ItemsSource="{Binding StartupDelayOptions}"
+                                                      SelectedItem="{Binding StartupDelaySeconds, Mode=TwoWay}"/>
+                                        </Grid>
+                                    </StackPanel>
                                 </Border>
                                 <Border Style="{StaticResource CardStyle}" Margin="0,0,0,14">
                                     <StackPanel>

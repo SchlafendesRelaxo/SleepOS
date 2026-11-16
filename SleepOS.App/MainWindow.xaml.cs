@@ -6,6 +6,12 @@ using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
 using System.Windows.Threading;
+using Button = System.Windows.Controls.Button;
+using Brush = System.Windows.Media.Brush;
+using Brushes = System.Windows.Media.Brushes;
+using Color = System.Windows.Media.Color;
+using KeyEventArgs = System.Windows.Input.KeyEventArgs;
+using MessageBox = System.Windows.MessageBox;
 
 namespace SleepOS.App;
 
@@ -14,6 +20,7 @@ public partial class MainWindow : Window
     private readonly DispatcherTimer _metricsTimer;
     private readonly ObservableCollection<CommandCenterItem> _visibleCommands = new();
     private List<CommandCenterItem> _commandActions = new();
+    private System.Windows.Forms.NotifyIcon? _trayIcon;
 
     public MainWindow()
     {
@@ -24,6 +31,7 @@ public partial class MainWindow : Window
         _metricsTimer.Tick += MetricsTimer_Tick;
         Loaded += MainWindow_Loaded;
         Closed += MainWindow_Closed;
+        StateChanged += MainWindow_StateChanged;
         UpdateNavigationState(DashboardNav);
     }
 
@@ -59,6 +67,54 @@ public partial class MainWindow : Window
     private void CloseWindow(object sender, RoutedEventArgs e)
     {
         Close();
+    }
+
+    internal void ShowInTray()
+    {
+        EnsureTrayIcon();
+        Hide();
+    }
+
+    private void MainWindow_StateChanged(object? sender, EventArgs e)
+    {
+        if (WindowState == WindowState.Minimized)
+        {
+            EnsureTrayIcon();
+            Hide();
+            WindowState = WindowState.Normal;
+        }
+    }
+
+    private void EnsureTrayIcon()
+    {
+        if (_trayIcon is not null)
+        {
+            return;
+        }
+
+        var menu = new System.Windows.Forms.ContextMenuStrip();
+        var openItem = new System.Windows.Forms.ToolStripMenuItem("Open SleepOS");
+        openItem.Click += (_, _) => RestoreFromTray();
+        var exitItem = new System.Windows.Forms.ToolStripMenuItem("Exit");
+        exitItem.Click += (_, _) => Close();
+        menu.Items.Add(openItem);
+        menu.Items.Add(exitItem);
+
+        _trayIcon = new System.Windows.Forms.NotifyIcon
+        {
+            Icon = System.Drawing.SystemIcons.Application,
+            Text = "SleepOS",
+            ContextMenuStrip = menu,
+            Visible = true
+        };
+        _trayIcon.DoubleClick += (_, _) => RestoreFromTray();
+    }
+
+    private void RestoreFromTray()
+    {
+        Show();
+        WindowState = WindowState.Normal;
+        Activate();
     }
 
     private void CommandCenter_Click(object sender, RoutedEventArgs e)
@@ -471,9 +527,13 @@ public partial class MainWindow : Window
     private void MainWindow_Closed(object? sender, EventArgs e)
     {
         _metricsTimer.Stop();
+        _trayIcon?.ContextMenuStrip?.Dispose();
+        _trayIcon?.Dispose();
+        _trayIcon = null;
         if (DataContext is ViewModels.MainWindowViewModel viewModel)
         {
             viewModel.PropertyChanged -= MainWindowViewModel_PropertyChanged;
+            viewModel.RestorePerformancePolicies();
         }
     }
 
@@ -686,6 +746,10 @@ public partial class MainWindow : Window
         if (DataContext is ViewModels.MainWindowViewModel vm && vm.AutoRefreshEnabled)
         {
             vm.RefreshMetrics();
+        }
+        else if (DataContext is ViewModels.MainWindowViewModel automationViewModel)
+        {
+            automationViewModel.EvaluatePerformanceAutomation();
         }
     }
 

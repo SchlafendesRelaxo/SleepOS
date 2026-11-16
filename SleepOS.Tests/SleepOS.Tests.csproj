@@ -19,6 +19,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\SleepOS.Games\SleepOS.Games.csproj" />
     <ProjectReference Include="..\SleepOS.Core\SleepOS.Core.csproj" />
     <ProjectReference Include="..\SleepOS.Monitoring\SleepOS.Monitoring.csproj" />
     <ProjectReference Include="..\SleepOS.Settings\SleepOS.Settings.csproj" />

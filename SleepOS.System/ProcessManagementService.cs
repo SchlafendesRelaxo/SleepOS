@@ -17,16 +17,25 @@ public sealed class ManagedProcessCandidate
     public long StartTimeUtcTicks { get; init; }
     public double MemoryMb { get; init; }
     public bool HasVisibleWindow { get; init; }
+    public bool IsForeground { get; init; }
+    public TimeSpan InactiveFor { get; init; }
+    public string WindowActivity => IsForeground ? "Foreground" : HasVisibleWindow ? "Background" : "No visible window";
+    public double? CpuUsagePercent { get; init; }
+    public string CpuUsageText => CpuUsagePercent is { } cpu ? $"{cpu:F1}% CPU" : "CPU N/A";
+    public string Priority { get; init; } = "Unavailable";
     public bool HasPublisherMetadata { get; init; }
     public string Recommendation { get; init; } = string.Empty;
     public string RecommendationDetails { get; init; } = string.Empty;
     public bool IsSuggestedForReview { get; init; }
     public bool IsSelected { get; set; }
+    public bool IsMemorySaverManaged { get; set; }
 }
 
 public sealed record ProcessScanResult(IReadOnlyList<ManagedProcessCandidate> Processes, int SkippedProcesses);
 
 public sealed record ProcessStopResult(int StoppedCount, IReadOnlyList<string> Failures);
+public sealed record ProcessEfficiencyResult(int UpdatedCount, IReadOnlyList<string> Failures);
+public sealed record ProcessPriorityResult(int UpdatedCount, IReadOnlyList<string> Failures);
 
 public sealed record ProcessRecommendation(string Title, string Details, bool IsSuggestedForReview);
 
@@ -69,10 +78,25 @@ public interface IProcessManagementService
 {
     ProcessScanResult GetStoppableProcesses(IReadOnlySet<string>? activeGameProcessNames = null);
     ProcessStopResult StopSelectedProcesses(IEnumerable<ManagedProcessCandidate> candidates);
+    ProcessEfficiencyResult SetEfficiencyMode(IEnumerable<ManagedProcessCandidate> candidates, bool enabled);
+    ProcessEfficiencyResult RestoreEfficiencyModes();
+    ProcessPriorityResult SetPriority(IEnumerable<ManagedProcessCandidate> candidates, ProcessPriorityClass? priorityClass);
+    ProcessPriorityResult RestoreProcessPriorities();
 }
 
 public sealed class ProcessManagementService : IProcessManagementService
 {
+    private const uint ProcessSetInformation = 0x0200;
+    private const uint ProcessQueryLimitedInformation = 0x1000;
+    private const uint ExecutionSpeedThrottling = 0x1;
+    private const int ProcessPowerThrottlingInformation = 4;
+    private readonly object _cpuSamplesLock = new();
+    private readonly Dictionary<int, (long StartTimeTicks, TimeSpan CpuTime, DateTime SampledAt)> _cpuSamples = [];
+    private readonly Dictionary<(int ProcessId, long StartTimeTicks), DateTime> _inactiveSince = [];
+    private readonly Dictionary<(int ProcessId, long StartTimeTicks), ProcessPowerThrottlingState> _originalPowerStates = [];
+    private readonly Dictionary<(int ProcessId, long StartTimeTicks), ProcessPriorityClass> _originalPriorities = [];
+    private readonly object _powerStatesLock = new();
+
     private static readonly HashSet<string> ProtectedProcessNames = new(StringComparer.OrdinalIgnoreCase)
     {
         "audiodg", "conhost", "csrss", "dwm", "explorer", "fontdrvhost", "lsass",
@@ -84,12 +108,15 @@ public sealed class ProcessManagementService : IProcessManagementService
     {
         var candidates = new List<ManagedProcessCandidate>();
         var skipped = 0;
+        var observedProcessIds = new HashSet<int>();
         var serviceProcessIds = GetRunningServiceProcessIds();
+        var foregroundProcessId = GetForegroundProcessId();
 
         foreach (var process in Process.GetProcesses())
         {
             try
             {
+                observedProcessIds.Add(process.Id);
                 if (serviceProcessIds.Contains(process.Id))
                 {
                     continue;
@@ -103,6 +130,9 @@ public sealed class ProcessManagementService : IProcessManagementService
 
                 var memoryMb = Math.Round(process.WorkingSet64 / (1024d * 1024d), 1);
                 var hasVisibleWindow = process.MainWindowHandle != IntPtr.Zero;
+                var startTimeTicks = process.StartTime.ToUniversalTime().Ticks;
+                var isForeground = process.Id == foregroundProcessId;
+                var inactiveFor = GetInactiveDuration(process.Id, startTimeTicks, isForeground);
                 var fileVersion = FileVersionInfo.GetVersionInfo(executablePath);
                 var productDescription = FirstNonEmpty(
                     fileVersion.ProductName,
@@ -122,9 +152,13 @@ public sealed class ProcessManagementService : IProcessManagementService
                     ExecutablePath = executablePath,
                     ProductDescription = productDescription,
                     Publisher = publisher,
-                    StartTimeUtcTicks = process.StartTime.ToUniversalTime().Ticks,
+                    StartTimeUtcTicks = startTimeTicks,
                     MemoryMb = memoryMb,
                     HasVisibleWindow = hasVisibleWindow,
+                    IsForeground = isForeground,
+                    InactiveFor = inactiveFor,
+                    CpuUsagePercent = GetCpuUsage(process, startTimeTicks),
+                    Priority = GetPriority(process),
                     HasPublisherMetadata = hasPublisherMetadata,
                     Recommendation = recommendation.Title,
                     RecommendationDetails = recommendation.Details,
@@ -158,6 +192,19 @@ public sealed class ProcessManagementService : IProcessManagementService
             finally
             {
                 process.Dispose();
+            }
+        }
+
+        lock (_cpuSamplesLock)
+        {
+            foreach (var processId in _cpuSamples.Keys.Where(processId => !observedProcessIds.Contains(processId)).ToArray())
+            {
+                _cpuSamples.Remove(processId);
+            }
+
+            foreach (var key in _inactiveSince.Keys.Where(key => !observedProcessIds.Contains(key.ProcessId)).ToArray())
+            {
+                _inactiveSince.Remove(key);
             }
         }
 
@@ -232,6 +279,419 @@ public sealed class ProcessManagementService : IProcessManagementService
         return new ProcessStopResult(stopped, failures);
     }
 
+    [SupportedOSPlatform("windows")]
+    public ProcessEfficiencyResult SetEfficiencyMode(IEnumerable<ManagedProcessCandidate> candidates, bool enabled)
+    {
+        var updated = 0;
+        var failures = new List<string>();
+        var serviceProcessIds = GetRunningServiceProcessIds();
+
+        foreach (var candidate in candidates.DistinctBy(candidate => (candidate.ProcessId, candidate.StartTimeUtcTicks)))
+        {
+            try
+            {
+                if (candidate.ProcessId == Environment.ProcessId || serviceProcessIds.Contains(candidate.ProcessId))
+                {
+                    failures.Add($"{candidate.Name}: SleepOS and Windows service processes are protected.");
+                    continue;
+                }
+
+                using var process = Process.GetProcessById(candidate.ProcessId);
+                var startTimeTicks = process.StartTime.ToUniversalTime().Ticks;
+                if (process.HasExited ||
+                    !string.Equals(process.ProcessName, candidate.Name, StringComparison.OrdinalIgnoreCase) ||
+                    startTimeTicks != candidate.StartTimeUtcTicks ||
+                    !string.Equals(GetEligibleExecutablePath(process), candidate.ExecutablePath, StringComparison.OrdinalIgnoreCase))
+                {
+                    failures.Add($"{candidate.Name}: process changed or is no longer eligible.");
+                    continue;
+                }
+
+                var processHandle = OpenProcess(
+                    ProcessSetInformation | ProcessQueryLimitedInformation,
+                    false,
+                    candidate.ProcessId);
+                if (processHandle == IntPtr.Zero)
+                {
+                    failures.Add($"{candidate.Name}: Windows denied access to change the process efficiency policy.");
+                    continue;
+                }
+
+                try
+                {
+                    var state = new ProcessPowerThrottlingState { Version = 1 };
+                    if (!GetProcessInformation(processHandle, ProcessPowerThrottlingInformation, ref state, (uint)Marshal.SizeOf<ProcessPowerThrottlingState>()))
+                    {
+                        failures.Add($"{candidate.Name}: Windows does not expose a restorable efficiency policy for this process.");
+                        continue;
+                    }
+
+                    var key = (candidate.ProcessId, startTimeTicks);
+                    ProcessPowerThrottlingState target;
+                    var hasPreviousState = false;
+                    lock (_powerStatesLock)
+                    {
+                        if (enabled)
+                        {
+                            _originalPowerStates.TryAdd(key, state);
+                            target = state;
+                            target.ControlMask |= ExecutionSpeedThrottling;
+                            target.StateMask |= ExecutionSpeedThrottling;
+                        }
+                        else if (_originalPowerStates.TryGetValue(key, out var previousState))
+                        {
+                            target = previousState;
+                            hasPreviousState = true;
+                        }
+                        else
+                        {
+                            failures.Add($"{candidate.Name}: no SleepOS efficiency policy is available to restore.");
+                            continue;
+                        }
+                    }
+
+                    if (!SetProcessInformation(processHandle, ProcessPowerThrottlingInformation, ref target, (uint)Marshal.SizeOf<ProcessPowerThrottlingState>()))
+                    {
+                        failures.Add($"{candidate.Name}: Windows could not apply the efficiency policy.");
+                        continue;
+                    }
+
+                    updated++;
+                    if (!enabled && hasPreviousState)
+                    {
+                        lock (_powerStatesLock)
+                        {
+                            _originalPowerStates.Remove(key);
+                        }
+                    }
+                }
+                finally
+                {
+                    CloseHandle(processHandle);
+                }
+            }
+            catch (Win32Exception exception)
+            {
+                failures.Add($"{candidate.Name}: {exception.Message}");
+            }
+            catch (InvalidOperationException)
+            {
+                failures.Add($"{candidate.Name}: process already exited.");
+            }
+            catch (UnauthorizedAccessException)
+            {
+                failures.Add($"{candidate.Name}: access denied.");
+            }
+            catch (ArgumentException)
+            {
+                failures.Add($"{candidate.Name}: process no longer exists.");
+            }
+        }
+
+        return new ProcessEfficiencyResult(updated, failures);
+    }
+
+    [SupportedOSPlatform("windows")]
+    public ProcessEfficiencyResult RestoreEfficiencyModes()
+    {
+        KeyValuePair<(int ProcessId, long StartTimeTicks), ProcessPowerThrottlingState>[] states;
+        lock (_powerStatesLock)
+        {
+            states = _originalPowerStates.ToArray();
+        }
+
+        var restored = 0;
+        var failures = new List<string>();
+        foreach (var (key, previousState) in states)
+        {
+            try
+            {
+                using var process = Process.GetProcessById(key.ProcessId);
+                if (process.HasExited || process.StartTime.ToUniversalTime().Ticks != key.StartTimeTicks)
+                {
+                    lock (_powerStatesLock)
+                    {
+                        _originalPowerStates.Remove(key);
+                    }
+
+                    continue;
+                }
+
+                var processHandle = OpenProcess(
+                    ProcessSetInformation | ProcessQueryLimitedInformation,
+                    false,
+                    key.ProcessId);
+                if (processHandle == IntPtr.Zero)
+                {
+                    failures.Add($"{process.ProcessName}: Windows denied access to restore its efficiency policy.");
+                    continue;
+                }
+
+                try
+                {
+                    var target = previousState;
+                    if (!SetProcessInformation(processHandle, ProcessPowerThrottlingInformation, ref target, (uint)Marshal.SizeOf<ProcessPowerThrottlingState>()))
+                    {
+                        failures.Add($"{process.ProcessName}: Windows could not restore its previous efficiency policy.");
+                        continue;
+                    }
+
+                    restored++;
+                    lock (_powerStatesLock)
+                    {
+                        _originalPowerStates.Remove(key);
+                    }
+                }
+                finally
+                {
+                    CloseHandle(processHandle);
+                }
+            }
+            catch (ArgumentException)
+            {
+                lock (_powerStatesLock)
+                {
+                    _originalPowerStates.Remove(key);
+                }
+            }
+            catch (Win32Exception exception)
+            {
+                failures.Add($"PID {key.ProcessId}: {exception.Message}");
+            }
+            catch (InvalidOperationException)
+            {
+                lock (_powerStatesLock)
+                {
+                    _originalPowerStates.Remove(key);
+                }
+            }
+            catch (UnauthorizedAccessException)
+            {
+                failures.Add($"PID {key.ProcessId}: access denied while restoring its efficiency policy.");
+            }
+        }
+
+        return new ProcessEfficiencyResult(restored, failures);
+    }
+
+    [SupportedOSPlatform("windows")]
+    public ProcessPriorityResult SetPriority(IEnumerable<ManagedProcessCandidate> candidates, ProcessPriorityClass? priorityClass)
+    {
+        if (priorityClass is not null &&
+            priorityClass is not (ProcessPriorityClass.Normal or ProcessPriorityClass.BelowNormal))
+        {
+            throw new ArgumentOutOfRangeException(nameof(priorityClass), "SleepOS supports only Normal and BelowNormal process priorities.");
+        }
+
+        var updated = 0;
+        var failures = new List<string>();
+        var serviceProcessIds = GetRunningServiceProcessIds();
+        foreach (var candidate in candidates.DistinctBy(candidate => (candidate.ProcessId, candidate.StartTimeUtcTicks)))
+        {
+            try
+            {
+                if (candidate.ProcessId == Environment.ProcessId || serviceProcessIds.Contains(candidate.ProcessId))
+                {
+                    failures.Add($"{candidate.Name}: SleepOS and Windows service processes are protected.");
+                    continue;
+                }
+
+                using var process = Process.GetProcessById(candidate.ProcessId);
+                var startTimeTicks = process.StartTime.ToUniversalTime().Ticks;
+                if (process.HasExited ||
+                    !string.Equals(process.ProcessName, candidate.Name, StringComparison.OrdinalIgnoreCase) ||
+                    startTimeTicks != candidate.StartTimeUtcTicks ||
+                    !string.Equals(GetEligibleExecutablePath(process), candidate.ExecutablePath, StringComparison.OrdinalIgnoreCase))
+                {
+                    failures.Add($"{candidate.Name}: process changed or is no longer eligible.");
+                    continue;
+                }
+
+                var key = (candidate.ProcessId, startTimeTicks);
+                if (priorityClass is null)
+                {
+                    ProcessPriorityClass originalPriority;
+                    lock (_powerStatesLock)
+                    {
+                        if (!_originalPriorities.TryGetValue(key, out originalPriority))
+                        {
+                            failures.Add($"{candidate.Name}: no SleepOS priority change is available to restore.");
+                            continue;
+                        }
+                    }
+
+                    process.PriorityClass = originalPriority;
+                    lock (_powerStatesLock)
+                    {
+                        _originalPriorities.Remove(key);
+                    }
+                }
+                else
+                {
+                    var currentPriority = process.PriorityClass;
+                    lock (_powerStatesLock)
+                    {
+                        _originalPriorities.TryAdd(key, currentPriority);
+                    }
+
+                    process.PriorityClass = priorityClass.Value;
+                }
+
+                updated++;
+            }
+            catch (Win32Exception exception)
+            {
+                failures.Add($"{candidate.Name}: {exception.Message}");
+            }
+            catch (InvalidOperationException)
+            {
+                failures.Add($"{candidate.Name}: process already exited.");
+            }
+            catch (UnauthorizedAccessException)
+            {
+                failures.Add($"{candidate.Name}: access denied.");
+            }
+            catch (ArgumentException)
+            {
+                failures.Add($"{candidate.Name}: process no longer exists.");
+            }
+        }
+
+        return new ProcessPriorityResult(updated, failures);
+    }
+
+    [SupportedOSPlatform("windows")]
+    public ProcessPriorityResult RestoreProcessPriorities()
+    {
+        KeyValuePair<(int ProcessId, long StartTimeTicks), ProcessPriorityClass>[] priorities;
+        lock (_powerStatesLock)
+        {
+            priorities = _originalPriorities.ToArray();
+        }
+
+        var restored = 0;
+        var failures = new List<string>();
+        foreach (var (key, priority) in priorities)
+        {
+            try
+            {
+                using var process = Process.GetProcessById(key.ProcessId);
+                if (process.HasExited || process.StartTime.ToUniversalTime().Ticks != key.StartTimeTicks)
+                {
+                    lock (_powerStatesLock)
+                    {
+                        _originalPriorities.Remove(key);
+                    }
+
+                    continue;
+                }
+
+                process.PriorityClass = priority;
+                restored++;
+                lock (_powerStatesLock)
+                {
+                    _originalPriorities.Remove(key);
+                }
+            }
+            catch (Win32Exception exception)
+            {
+                failures.Add($"PID {key.ProcessId}: {exception.Message}");
+            }
+            catch (InvalidOperationException)
+            {
+                lock (_powerStatesLock)
+                {
+                    _originalPriorities.Remove(key);
+                }
+            }
+            catch (UnauthorizedAccessException)
+            {
+                failures.Add($"PID {key.ProcessId}: access denied while restoring its priority.");
+            }
+            catch (ArgumentException)
+            {
+                lock (_powerStatesLock)
+                {
+                    _originalPriorities.Remove(key);
+                }
+            }
+        }
+
+        return new ProcessPriorityResult(restored, failures);
+    }
+
+    private double? GetCpuUsage(Process process, long startTimeTicks)
+    {
+        var now = DateTime.UtcNow;
+        var cpuTime = process.TotalProcessorTime;
+        lock (_cpuSamplesLock)
+        {
+            if (_cpuSamples.TryGetValue(process.Id, out var previous) &&
+                previous.StartTimeTicks == startTimeTicks &&
+                now > previous.SampledAt)
+            {
+                var elapsed = (now - previous.SampledAt).TotalMilliseconds;
+                var cpuMilliseconds = (cpuTime - previous.CpuTime).TotalMilliseconds;
+                _cpuSamples[process.Id] = (startTimeTicks, cpuTime, now);
+                return Math.Clamp(cpuMilliseconds / elapsed / Environment.ProcessorCount * 100d, 0d, 100d);
+            }
+
+            _cpuSamples[process.Id] = (startTimeTicks, cpuTime, now);
+            return null;
+        }
+    }
+
+    private TimeSpan GetInactiveDuration(int processId, long startTimeTicks, bool isForeground)
+    {
+        var key = (processId, startTimeTicks);
+        var now = DateTime.UtcNow;
+        lock (_cpuSamplesLock)
+        {
+            if (isForeground)
+            {
+                _inactiveSince[key] = now;
+                return TimeSpan.Zero;
+            }
+
+            if (!_inactiveSince.TryGetValue(key, out var inactiveSince))
+            {
+                inactiveSince = now;
+                _inactiveSince[key] = inactiveSince;
+            }
+
+            return now - inactiveSince;
+        }
+    }
+
+    private static int GetForegroundProcessId()
+    {
+        var foregroundWindow = GetForegroundWindow();
+        return foregroundWindow == IntPtr.Zero ||
+            GetWindowThreadProcessId(foregroundWindow, out var processId) == 0
+                ? 0
+                : unchecked((int)processId);
+    }
+
+    private static string GetPriority(Process process)
+    {
+        try
+        {
+            return process.PriorityClass.ToString();
+        }
+        catch (Win32Exception)
+        {
+            return "Unavailable";
+        }
+        catch (InvalidOperationException)
+        {
+            return "Unavailable";
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return "Unavailable";
+        }
+    }
+
     private static HashSet<int> GetRunningServiceProcessIds()
     {
         if (!OperatingSystem.IsWindows())
@@ -292,6 +752,43 @@ public sealed class ProcessManagementService : IProcessManagementService
 
     private static string FirstNonEmpty(params string?[] values) =>
         values.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value)) ?? "No file description available";
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern IntPtr OpenProcess(uint desiredAccess, [MarshalAs(UnmanagedType.Bool)] bool inheritHandle, int processId);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetProcessInformation(
+        IntPtr process,
+        int processInformationClass,
+        ref ProcessPowerThrottlingState processInformation,
+        uint processInformationSize);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool SetProcessInformation(
+        IntPtr process,
+        int processInformationClass,
+        ref ProcessPowerThrottlingState processInformation,
+        uint processInformationSize);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool CloseHandle(IntPtr handle);
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct ProcessPowerThrottlingState
+    {
+        public uint Version;
+        public uint ControlMask;
+        public uint StateMask;
+    }
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetForegroundWindow();
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern uint GetWindowThreadProcessId(IntPtr window, out uint processId);
 }
 
 public sealed class DesktopShortcutCandidate

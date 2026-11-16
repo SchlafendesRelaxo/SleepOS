@@ -1,4 +1,6 @@
 using System.ComponentModel;
+using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.IO;
 using System.Collections.ObjectModel;
 using System.Net.Http;
@@ -29,11 +31,18 @@ public partial class MainWindowViewModel : ObservableObject
     private readonly IAppSettingsStore _settingsStore;
     private readonly InstalledVersionService _versionService;
     private readonly IDesktopShortcutService _desktopShortcutService;
+    private readonly IWindowsStartupService _startupService;
     private string _performanceMode = "Balanced";
     private string _accentTheme = "Violet";
     private string _colorMode = "Dark";
     private int _metricsRefreshSeconds = 5;
     private bool _pageAnimationsEnabled = true;
+    private DateTime _lastAutomationRunUtc = DateTime.MinValue;
+    private int _automationInProgress;
+    private bool _isClosing;
+    private readonly ConcurrentDictionary<(int ProcessId, long StartTimeTicks), ManagedProcessCandidate> _automaticEfficiencyProcesses = new();
+    private bool _startMinimized;
+    private int _startupDelaySeconds;
 
     public MainWindowViewModel(
         ISystemMonitorService monitorService,
@@ -45,7 +54,8 @@ public partial class MainWindowViewModel : ObservableObject
         IGameService gameService,
         IAppSettingsStore settingsStore,
         InstalledVersionService versionService,
-        IDesktopShortcutService desktopShortcutService)
+        IDesktopShortcutService desktopShortcutService,
+        IWindowsStartupService startupService)
     {
         _monitorService = monitorService;
         _hardwareInventoryService = hardwareInventoryService;
@@ -57,9 +67,11 @@ public partial class MainWindowViewModel : ObservableObject
         _settingsStore = settingsStore;
         _versionService = versionService;
         _desktopShortcutService = desktopShortcutService;
+        _startupService = startupService;
 
         UpdateSettings(_settingsStore.Load());
         LoadProfiles();
+        RefreshStartupStatus();
         RefreshMetrics();
     }
 
@@ -68,6 +80,9 @@ public partial class MainWindowViewModel : ObservableObject
     public ObservableCollection<OptimizationProfile> Profiles { get; } = new();
     public ObservableCollection<ProcessPerformance> RunningProcesses { get; } = new();
     public ObservableCollection<ManagedProcessCandidate> ManageableProcesses { get; } = new();
+    public ObservableCollection<ApplicationPerformanceRule> ManagedApplications { get; } = new();
+    public ObservableCollection<PerformanceBenchmarkRecord> BenchmarkHistory { get; } = new();
+    public ObservableCollection<GamePerformanceProfile> GameProcessProfiles { get; } = new();
     public ObservableCollection<GameSession> ActiveGames { get; } = new();
     public ObservableCollection<HardwareInventoryItem> HardwareInventory { get; } = new();
     public ObservableCollection<string> HardwareInventoryWarnings { get; } = new();
@@ -79,12 +94,15 @@ public partial class MainWindowViewModel : ObservableObject
     public ObservableCollection<string> DesktopShortcutWarnings { get; } = new();
     public IReadOnlyList<string> AccentThemeOptions { get; } = ["Violet", "Blue", "Mint"];
     public IReadOnlyList<string> ColorModeOptions { get; } = ["Dark", "Light"];
-    public IReadOnlyList<string> PerformanceModeOptions { get; } = ["Balanced", "Game focus", "Low activity", "Custom"];
+    public IReadOnlyList<string> PerformanceModeOptions { get; } = ["Balanced", "Gaming", "Extreme Performance", "Battery Saver", "Custom"];
     public IReadOnlyList<int> MetricsRefreshOptions { get; } = [5, 10, 30];
+    public IReadOnlyList<int> MemorySaverInactivityOptions { get; } = [1, 5, 10, 20, 30, 60];
+    public IReadOnlyList<int> StartupDelayOptions { get; } = [0, 5, 10, 30, 60, 120, 300];
+    public IReadOnlyList<string> GamePerformanceModeOptions { get; } = ["Balanced", "Gaming", "Extreme Performance", "Battery Saver"];
 
     public string Greeting { get; set; } = "Good evening, gamer";
     public string SystemStatus { get; set; } = "Nominal";
-    public string GamingModeText { get; set; } = "Gaming Mode: Off";
+    public string GamingModeText { get; set; } = "Gaming policy: Off";
     public string ActivePowerProfile { get; set; } = "Balanced";
     public string CurrentProfile { get; set; } = "Balanced";
     public string UptimeText { get; set; } = "0:00:00";
@@ -98,6 +116,41 @@ public partial class MainWindowViewModel : ObservableObject
     public bool CanRemoveDuplicateShortcuts => DuplicateDesktopShortcuts.Any(shortcut => shortcut.IsSelected);
     public bool CanCleanTemporaryFiles { get; private set; }
     public string ProcessManagementStatus { get; private set; } = "Scan to find running non-Windows apps.";
+    public string MemorySaverStatus { get; private set; } = "Memory Saver is opt-in and only applies Windows efficiency mode to apps you manage.";
+    public string StartupStatus { get; private set; } = "Checking current-user sign-in startup...";
+    public string BenchmarkStatus { get; private set; } = "Capture a baseline, make a change, then capture another reading to compare measured values.";
+    public string GameProfileStatus { get; private set; } = "Add a running app from Background apps to recognize it as a game.";
+    public bool AutoStartEnabled { get; private set; }
+    public bool StartMinimized
+    {
+        get => _startMinimized;
+        set
+        {
+            if (SetProperty(ref _startMinimized, value))
+            {
+                SaveStartupSettings();
+            }
+        }
+    }
+
+    public int StartupDelaySeconds
+    {
+        get => _startupDelaySeconds;
+        set
+        {
+            var normalized = StartupDelayOptions.Contains(value) ? value : 0;
+            if (SetProperty(ref _startupDelaySeconds, normalized))
+            {
+                SaveStartupSettings();
+            }
+        }
+    }
+    public bool AutomaticMemorySaverEnabled { get; private set; }
+    public bool AutomaticGamingModeEnabled { get; private set; }
+    public bool AutomaticHighCpuAnalysisEnabled { get; private set; }
+    public bool HasPerformanceAutomation => AutomaticMemorySaverEnabled || AutomaticGamingModeEnabled ||
+        AutomaticHighCpuAnalysisEnabled || _automaticEfficiencyProcesses.Count > 0;
+    public bool IsStartupDelayEnabled => AutoStartEnabled;
     public string HardwareInventoryStatus { get; private set; } = "Scan to read hardware details reported by Windows.";
     public string NetworkAdapterStatus { get; private set; } = "Scan to read network adapters reported by Windows.";
     public string NetworkPingStatus { get; private set; } = "Enter a target and run a test. No network probes are sent automatically.";
@@ -154,7 +207,7 @@ public partial class MainWindowViewModel : ObservableObject
             SetProperty(ref _metricsRefreshSeconds, normalizedSeconds);
             SetProperty(ref _performanceMode, "Custom", nameof(PerformanceMode));
             GamingModeEnabled = false;
-            GamingModeText = "Game focus: Off";
+            GamingModeText = "Gaming policy: Off";
             ActionStatus = $"System readings refresh every {normalizedSeconds} seconds.";
             NotifyPerformanceSettingsChanged();
             OnPropertyChanged(nameof(ActionStatus));
@@ -208,7 +261,7 @@ public partial class MainWindowViewModel : ObservableObject
             SetProperty(ref _pageAnimationsEnabled, value);
             SetProperty(ref _performanceMode, "Custom", nameof(PerformanceMode));
             GamingModeEnabled = false;
-            GamingModeText = "Game focus: Off";
+            GamingModeText = "Gaming policy: Off";
             ActionStatus = value ? "Page transitions and orbit motion enabled." : "Page transitions and orbit motion disabled.";
             NotifyPerformanceSettingsChanged();
             OnPropertyChanged(nameof(ActionStatus));
@@ -236,13 +289,19 @@ public partial class MainWindowViewModel : ObservableObject
                     settings.PageAnimationsEnabled = true;
                     settings.GamingModeEnabled = false;
                     break;
-                case "Game focus":
-                    settings.AutoRefreshEnabled = false;
-                    settings.MetricsRefreshSeconds = 30;
+                case "Gaming":
+                    settings.AutoRefreshEnabled = true;
+                    settings.MetricsRefreshSeconds = 10;
                     settings.PageAnimationsEnabled = false;
                     settings.GamingModeEnabled = true;
                     break;
-                case "Low activity":
+                case "Extreme Performance":
+                    settings.AutoRefreshEnabled = false;
+                    settings.MetricsRefreshSeconds = 30;
+                    settings.PageAnimationsEnabled = false;
+                    settings.GamingModeEnabled = false;
+                    break;
+                case "Battery Saver":
                     settings.AutoRefreshEnabled = true;
                     settings.MetricsRefreshSeconds = 30;
                     settings.PageAnimationsEnabled = false;
@@ -260,10 +319,10 @@ public partial class MainWindowViewModel : ObservableObject
             NotifyPerformanceSettingsChanged();
             ActionStatus = normalizedMode switch
             {
-                "Balanced" => "Balanced SleepOS mode enabled: 5-second metrics and page animations.",
-                "Game focus" => "Game focus enabled: SleepOS metrics polling and page animations are paused.",
-                "Low activity" => "Low activity enabled: 30-second metrics and no page animations.",
-                _ => "Custom SleepOS performance settings selected."
+                "Balanced" => "Balanced performance policy enabled. Automatic process management remains opt-in.",
+                "Gaming" => "Gaming policy enabled. Selected background apps may use Windows efficiency mode after their idle threshold.",
+                "Extreme Performance" => "Extreme Performance minimizes SleepOS background polling; it does not overclock or change system services.",
+                _ => "Battery Saver policy enabled. Selected idle apps may use Windows efficiency mode when memory pressure is high."
             };
             OnPropertyChanged(nameof(ActionStatus));
         }
@@ -273,15 +332,15 @@ public partial class MainWindowViewModel : ObservableObject
     public int RecommendedProcessCount => ManageableProcesses.Count(process => process.IsSuggestedForReview);
     public IReadOnlyList<ManagedProcessCandidate> SelectedStoppableProcesses =>
         ManageableProcesses.Where(process => process.IsSelected).ToArray();
-    public string GamingModeStatus => GamingModeEnabled ? "On for this app" : "Off";
+    public string GamingModeStatus => GamingModeEnabled ? "On • SleepOS polling and display policy" : "Off";
     public string AutoRefreshStatus => AutoRefreshEnabled ? $"On • every {MetricsRefreshSeconds} seconds" : "Off";
     public string PageAnimationsStatus => PageAnimationsEnabled ? "Enabled • page transitions and orbit motion" : "Disabled";
     public string PerformanceModeStatus => _performanceMode switch
     {
-        "Game focus" => "Pauses SleepOS polling and motion. No Windows settings are changed.",
-        "Low activity" => "Refreshes SleepOS metrics every 30 seconds with animations off.",
-        "Custom" => "Your SleepOS refresh and animation settings. Windows is unchanged.",
-        _ => "Refreshes SleepOS metrics every 5 seconds with smooth page transitions."
+        "Gaming" => "Refreshes every 10 seconds. Only explicitly managed background apps can receive EcoQoS.",
+        "Extreme Performance" => "Pauses automatic metrics polling and animations. No Windows power plan is changed.",
+        "Battery Saver" => "Refreshes every 30 seconds and favors selected idle apps when memory is under pressure.",
+        _ => "Refreshes every 5 seconds with page animations. Automatic process optimization is opt-in."
     };
 
     [RelayCommand]
@@ -331,9 +390,9 @@ public partial class MainWindowViewModel : ObservableObject
             _ => "Good evening, gamer"
         };
 
-        GamingModeEnabled = string.Equals(_performanceMode, "Game focus", StringComparison.Ordinal);
+        GamingModeEnabled = string.Equals(_performanceMode, "Gaming", StringComparison.Ordinal);
         AutoRefreshEnabled = settings.AutoRefreshEnabled;
-        GamingModeText = GamingModeEnabled ? "Game focus: On (SleepOS only)" : "Game focus: Off";
+        GamingModeText = GamingModeEnabled ? "Gaming policy: On" : "Gaming policy: Off";
         ActivePowerProfile = _systemService.GetActivePowerProfile();
         CurrentProfile = NormalizeProfileName(settings.LastSelectedProfile);
         UptimeText = metrics.UptimeText;
@@ -355,7 +414,7 @@ public partial class MainWindowViewModel : ObservableObject
         }
 
         ActiveGames.Clear();
-        var runningGames = _gameService.GetRunningGames();
+        var runningGames = GetRunningGames();
         if (runningGames.Count == 0)
         {
             ActiveGames.Add(new GameSession { Name = "No known game process detected", Status = "Idle" });
@@ -391,6 +450,7 @@ public partial class MainWindowViewModel : ObservableObject
         OnPropertyChanged(nameof(GamingModeStatus));
         OnPropertyChanged(nameof(AutoRefreshStatus));
         OnPropertyChanged(nameof(NetworkThroughputStatus));
+        SchedulePerformanceAutomation(metrics, runningGames);
     }
 
     [RelayCommand]
@@ -642,7 +702,7 @@ public partial class MainWindowViewModel : ObservableObject
     [RelayCommand]
     public void ToggleGamingMode()
     {
-        PerformanceMode = GamingModeEnabled ? "Balanced" : "Game focus";
+        PerformanceMode = GamingModeEnabled ? "Balanced" : "Gaming";
     }
 
     [RelayCommand]
@@ -679,6 +739,20 @@ public partial class MainWindowViewModel : ObservableObject
         OnPropertyChanged(nameof(RecentOptimizations));
         ActionStatus = $"Windows power plan changed to {ActivePowerProfile}.";
         OnPropertyChanged(nameof(ActionStatus));
+    }
+
+    [RelayCommand]
+    public void ToggleAutomaticHighCpuAnalysis()
+    {
+        var settings = _settingsStore.Load();
+        settings.AutomaticHighCpuAnalysisEnabled = !settings.AutomaticHighCpuAnalysisEnabled;
+        if (!SaveSettings(settings))
+        {
+            return;
+        }
+
+        AutomaticHighCpuAnalysisEnabled = settings.AutomaticHighCpuAnalysisEnabled;
+        OnPropertyChanged(nameof(AutomaticHighCpuAnalysisEnabled));
     }
 
     [RelayCommand]
@@ -735,7 +809,7 @@ public partial class MainWindowViewModel : ObservableObject
         AutoRefreshEnabled = settings.AutoRefreshEnabled;
         SetProperty(ref _performanceMode, "Custom", nameof(PerformanceMode));
         GamingModeEnabled = false;
-        GamingModeText = "Game focus: Off";
+        GamingModeText = "Gaming policy: Off";
         ActionStatus = $"Automatic system refresh {AutoRefreshStatus.ToLowerInvariant()}.";
         NotifyPerformanceSettingsChanged();
         OnPropertyChanged(nameof(ActionStatus));
@@ -821,14 +895,19 @@ public partial class MainWindowViewModel : ObservableObject
         {
             var result = await Task.Run(() =>
             {
-                var activeGameProcessNames = _gameService.GetRunningGames()
+                var activeGameProcessNames = GetRunningGames()
                     .Where(game => string.Equals(game.Status, "Running", StringComparison.OrdinalIgnoreCase))
                     .Select(game => game.Name)
                     .ToHashSet(StringComparer.OrdinalIgnoreCase);
                 return _processManagementService.GetStoppableProcesses(activeGameProcessNames);
             });
+            var managedPaths = (_settingsStore.Load().ManagedApplications ?? [])
+                .Where(rule => rule.Enabled)
+                .Select(rule => rule.ExecutablePath)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
             foreach (var process in result.Processes)
             {
+                process.IsMemorySaverManaged = managedPaths.Contains(process.ExecutablePath);
                 ManageableProcesses.Add(process);
             }
 
@@ -908,6 +987,366 @@ public partial class MainWindowViewModel : ObservableObject
     }
 
     [RelayCommand]
+    public void AddSelectedToMemorySaver()
+    {
+        var selected = SelectedStoppableProcesses;
+        if (selected.Count == 0)
+        {
+            MemorySaverStatus = "Select one or more app processes in the list first.";
+            OnPropertyChanged(nameof(MemorySaverStatus));
+            return;
+        }
+
+        foreach (var process in selected)
+        {
+            if (ManagedApplications.Any(rule => string.Equals(rule.ExecutablePath, process.ExecutablePath, StringComparison.OrdinalIgnoreCase)))
+            {
+                continue;
+            }
+
+            ManagedApplications.Add(new ApplicationPerformanceRule
+            {
+                ExecutablePath = process.ExecutablePath,
+                ProcessName = process.Name,
+                InactivityMinutes = 10,
+                Enabled = true
+            });
+            process.IsMemorySaverManaged = true;
+        }
+
+        SaveMemorySaverRules();
+    }
+
+    [RelayCommand]
+    public void ApplyEfficiencyModeToSelected()
+    {
+        var selected = SelectedStoppableProcesses;
+        if (selected.Count == 0)
+        {
+            ProcessManagementStatus = "Select one or more eligible app processes first.";
+        }
+        else
+        {
+            var result = _processManagementService.SetEfficiencyMode(selected, enabled: true);
+            ProcessManagementStatus = $"{result.UpdatedCount:N0} process(es) now use Windows efficiency mode.";
+            if (result.Failures.Count > 0)
+            {
+                ProcessManagementStatus += $" {result.Failures.Count:N0} could not be changed: {string.Join(" ", result.Failures.Take(2))}";
+            }
+        }
+
+        OnPropertyChanged(nameof(ProcessManagementStatus));
+    }
+
+    [RelayCommand]
+    public void RestoreEfficiencyModeForSelected()
+    {
+        var selected = SelectedStoppableProcesses;
+        if (selected.Count == 0)
+        {
+            ProcessManagementStatus = "Select one or more eligible app processes first.";
+        }
+        else
+        {
+            var result = _processManagementService.SetEfficiencyMode(selected, enabled: false);
+            ProcessManagementStatus = $"{result.UpdatedCount:N0} process efficiency policy(ies) restored.";
+            if (result.Failures.Count > 0)
+            {
+                ProcessManagementStatus += $" {result.Failures.Count:N0} could not be restored: {string.Join(" ", result.Failures.Take(2))}";
+            }
+        }
+
+        OnPropertyChanged(nameof(ProcessManagementStatus));
+    }
+
+    [RelayCommand]
+    public void SetSelectedProcessesToBelowNormal()
+    {
+        SetSelectedProcessPriority(System.Diagnostics.ProcessPriorityClass.BelowNormal);
+    }
+
+    [RelayCommand]
+    public void RestoreSelectedProcessPriorities()
+    {
+        var selected = SelectedStoppableProcesses;
+        if (selected.Count == 0)
+        {
+            ProcessManagementStatus = "Select one or more eligible app processes first.";
+        }
+        else
+        {
+            var result = _processManagementService.SetPriority(selected, priorityClass: null);
+            ProcessManagementStatus = $"{result.UpdatedCount:N0} process priority(ies) restored.";
+            if (result.Failures.Count > 0)
+            {
+                ProcessManagementStatus += $" {result.Failures.Count:N0} could not be restored: {string.Join(" ", result.Failures.Take(2))}";
+            }
+        }
+
+        OnPropertyChanged(nameof(ProcessManagementStatus));
+    }
+
+    [RelayCommand]
+    public void RemoveMemorySaverRule(ApplicationPerformanceRule rule)
+    {
+        if (ManagedApplications.Remove(rule))
+        {
+            SaveMemorySaverRules();
+        }
+    }
+
+    [RelayCommand]
+    public void AddSelectedToGameProfiles()
+    {
+        var selected = SelectedStoppableProcesses;
+        if (selected.Count == 0)
+        {
+            GameProfileStatus = "Select one or more running app processes in the list first.";
+            OnPropertyChanged(nameof(GameProfileStatus));
+            return;
+        }
+
+        var settings = _settingsStore.Load();
+        settings.GameProfiles ??= [];
+        foreach (var process in selected)
+        {
+            if (!settings.GameProfiles.Any(profile =>
+                    string.Equals(profile.ExecutablePath, process.ExecutablePath, StringComparison.OrdinalIgnoreCase)))
+            {
+                settings.GameProfiles.Add(new GamePerformanceProfile
+                {
+                    ExecutablePath = process.ExecutablePath,
+                    ProcessName = process.Name,
+                    PerformanceMode = "Gaming",
+                    Enabled = true
+                });
+            }
+        }
+
+        if (!SaveSettings(settings))
+        {
+            return;
+        }
+
+        UpdateGameProcessProfiles(settings.GameProfiles);
+        GameProfileStatus = $"{GameProcessProfiles.Count:N0} custom game profile(s) saved. Automatic profile switching applies only when enabled in Settings.";
+        OnPropertyChanged(nameof(GameProfileStatus));
+    }
+
+    [RelayCommand]
+    public void RemoveGameProcessProfile(GamePerformanceProfile profile)
+    {
+        var settings = _settingsStore.Load();
+        settings.GameProfiles ??= [];
+        settings.GameProfiles.RemoveAll(candidate =>
+            string.Equals(candidate.ExecutablePath, profile.ExecutablePath, StringComparison.OrdinalIgnoreCase));
+        if (!SaveSettings(settings))
+        {
+            return;
+        }
+
+        UpdateGameProcessProfiles(settings.GameProfiles);
+        GameProfileStatus = $"Removed {profile.ProcessName} from custom game detection.";
+        OnPropertyChanged(nameof(GameProfileStatus));
+    }
+
+    [RelayCommand]
+    public void SaveGameProfiles()
+    {
+        var settings = _settingsStore.Load();
+        settings.GameProfiles = GameProcessProfiles
+            .Where(profile => !string.IsNullOrWhiteSpace(profile.ExecutablePath))
+            .Select(profile => new GamePerformanceProfile
+            {
+                ExecutablePath = Path.GetFullPath(profile.ExecutablePath),
+                ProcessName = profile.ProcessName,
+                PerformanceMode = NormalizeGamePerformanceMode(profile.PerformanceMode),
+                Enabled = profile.Enabled
+            })
+            .DistinctBy(profile => profile.ExecutablePath, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        if (SaveSettings(settings))
+        {
+            GameProfileStatus = $"{settings.GameProfiles.Count:N0} custom game profile(s) saved.";
+            OnPropertyChanged(nameof(GameProfileStatus));
+        }
+    }
+
+    [RelayCommand]
+    public void SaveMemorySaverRules()
+    {
+        var settings = _settingsStore.Load();
+        settings.ManagedApplications = ManagedApplications
+            .Where(rule => !string.IsNullOrWhiteSpace(rule.ExecutablePath))
+            .Select(rule => new ApplicationPerformanceRule
+            {
+                ExecutablePath = Path.GetFullPath(rule.ExecutablePath),
+                ProcessName = rule.ProcessName,
+                InactivityMinutes = MemorySaverInactivityOptions.Contains(rule.InactivityMinutes) ? rule.InactivityMinutes : 10,
+                Enabled = rule.Enabled
+            })
+            .DistinctBy(rule => rule.ExecutablePath, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        if (!SaveSettings(settings))
+        {
+            return;
+        }
+
+        foreach (var process in ManageableProcesses)
+        {
+            process.IsMemorySaverManaged = settings.ManagedApplications.Any(rule =>
+                rule.Enabled && string.Equals(rule.ExecutablePath, process.ExecutablePath, StringComparison.OrdinalIgnoreCase));
+        }
+
+        MemorySaverStatus = $"{settings.ManagedApplications.Count(rule => rule.Enabled):N0} app rule(s) saved. Only selected, eligible apps can be changed.";
+        OnPropertyChanged(nameof(ManagedApplications));
+        OnPropertyChanged(nameof(MemorySaverStatus));
+    }
+
+    [RelayCommand]
+    public void ToggleAutomaticMemorySaver()
+    {
+        var settings = _settingsStore.Load();
+        settings.AutomaticMemorySaverEnabled = !settings.AutomaticMemorySaverEnabled;
+        if (!SaveSettings(settings))
+        {
+            return;
+        }
+
+        AutomaticMemorySaverEnabled = settings.AutomaticMemorySaverEnabled;
+        MemorySaverStatus = AutomaticMemorySaverEnabled
+            ? "Automatic Memory Saver is on. It only uses EcoQoS for opted-in, visible apps after their idle threshold and at high CPU or memory load."
+            : "Automatic Memory Saver is off. Existing SleepOS-applied efficiency settings will be restored on the next evaluation.";
+        OnPropertyChanged(nameof(AutomaticMemorySaverEnabled));
+        OnPropertyChanged(nameof(MemorySaverStatus));
+    }
+
+    [RelayCommand]
+    public void ToggleAutomaticGamingMode()
+    {
+        var settings = _settingsStore.Load();
+        settings.AutomaticGamingModeEnabled = !settings.AutomaticGamingModeEnabled;
+        if (!SaveSettings(settings))
+        {
+            return;
+        }
+
+        AutomaticGamingModeEnabled = settings.AutomaticGamingModeEnabled;
+        ActionStatus = AutomaticGamingModeEnabled
+            ? "Automatic gaming detection is on. SleepOS will apply its selected-app background policy and restore it after the game ends."
+            : "Automatic gaming detection is off. SleepOS-applied policies will be restored on the next evaluation.";
+        OnPropertyChanged(nameof(AutomaticGamingModeEnabled));
+        OnPropertyChanged(nameof(ActionStatus));
+    }
+
+    [RelayCommand]
+    public void ToggleAutoStart()
+    {
+        var settings = _settingsStore.Load();
+        settings.AutoStartEnabled = !settings.AutoStartEnabled;
+        try
+        {
+            _startupService.Configure(settings.AutoStartEnabled, StartupDelaySeconds, StartMinimized);
+            if (!SaveSettings(settings))
+            {
+                _startupService.Configure(AutoStartEnabled, StartupDelaySeconds, StartMinimized);
+                return;
+            }
+
+            AutoStartEnabled = settings.AutoStartEnabled;
+            StartupStatus = AutoStartEnabled
+                ? "SleepOS is registered to start for this Windows user."
+                : "SleepOS will not start automatically at Windows sign-in.";
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or UnauthorizedAccessException or IOException or PlatformNotSupportedException or System.Security.SecurityException)
+        {
+            StartupStatus = $"Could not update Windows sign-in startup: {exception.Message}";
+        }
+
+        OnPropertyChanged(nameof(AutoStartEnabled));
+        OnPropertyChanged(nameof(IsStartupDelayEnabled));
+        OnPropertyChanged(nameof(StartupStatus));
+    }
+
+    [RelayCommand]
+    public async Task CapturePerformanceBenchmarkAsync()
+    {
+        BenchmarkStatus = "Capturing actual Windows CPU, memory, and background-process readings...";
+        OnPropertyChanged(nameof(BenchmarkStatus));
+
+        try
+        {
+            var sample = await Task.Run(CaptureBenchmarkSnapshot);
+            var settings = _settingsStore.Load();
+            settings.BenchmarkHistory ??= [];
+            var previous = settings.BenchmarkHistory.LastOrDefault();
+            sample.Label = $"Snapshot {settings.BenchmarkHistory.Count + 1:N0}";
+            settings.BenchmarkHistory.Add(sample);
+            settings.BenchmarkHistory = settings.BenchmarkHistory.TakeLast(20).ToList();
+            if (!SaveSettings(settings))
+            {
+                return;
+            }
+
+            BenchmarkHistory.Add(sample);
+            while (BenchmarkHistory.Count > 20)
+            {
+                BenchmarkHistory.RemoveAt(0);
+            }
+
+            BenchmarkStatus = previous is null
+                ? $"Baseline captured at {sample.CapturedAt.ToLocalTime():t}: CPU {FormatPercent(sample.CpuUsagePercent)}, RAM {FormatGigabytes(sample.RamUsedGb)} of {FormatGigabytes(sample.TotalRamGb)}, {sample.BackgroundProcessCount:N0} background process(es), {sample.UninspectedProcessCount:N0} uninspected."
+                : FormatBenchmarkDifference(previous, sample);
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or UnauthorizedAccessException or IOException or System.ComponentModel.Win32Exception)
+        {
+            BenchmarkStatus = $"Benchmark capture failed: {exception.Message}";
+        }
+
+        OnPropertyChanged(nameof(BenchmarkStatus));
+        OnPropertyChanged(nameof(BenchmarkHistory));
+    }
+
+    public void RestorePerformancePolicies()
+    {
+        _isClosing = true;
+        var efficiencyResult = _processManagementService.RestoreEfficiencyModes();
+        var priorityResult = _processManagementService.RestoreProcessPriorities();
+        var failures = efficiencyResult.Failures.Concat(priorityResult.Failures).ToArray();
+        if (failures.Length > 0)
+        {
+            foreach (var failure in failures)
+            {
+                Trace.TraceError("SleepOS could not restore a temporary process policy: {0}", failure);
+            }
+
+            MemorySaverStatus = $"Restored {efficiencyResult.UpdatedCount:N0} efficiency and {priorityResult.UpdatedCount:N0} priority policy(ies); {failures.Length:N0} could not be restored.";
+            OnPropertyChanged(nameof(MemorySaverStatus));
+        }
+    }
+
+    public void EvaluatePerformanceAutomation()
+    {
+        if (_isClosing || !HasPerformanceAutomation ||
+            DateTime.UtcNow - _lastAutomationRunUtc < TimeSpan.FromSeconds(30))
+        {
+            return;
+        }
+
+        try
+        {
+            var metrics = _monitorService.Capture();
+            SchedulePerformanceAutomation(metrics, GetRunningGames());
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or UnauthorizedAccessException or IOException or System.ComponentModel.Win32Exception)
+        {
+            Trace.TraceError("Automatic SleepOS performance readings failed: {0}", exception);
+            MemorySaverStatus = $"Automatic performance readings failed: {exception.Message}";
+            OnPropertyChanged(nameof(MemorySaverStatus));
+        }
+    }
+
+    [RelayCommand]
     public void OpenWindowsUpdateSettings() => OpenWindowsSettings(
         _systemService.OpenWindowsUpdateSettings, "Windows Update");
 
@@ -958,6 +1397,264 @@ public partial class MainWindowViewModel : ObservableObject
         return false;
     }
 
+    private void SaveStartupSettings()
+    {
+        var settings = _settingsStore.Load();
+        var oldStartMinimized = settings.StartMinimized;
+        var oldStartupDelay = settings.StartupDelaySeconds;
+        settings.StartMinimized = StartMinimized;
+        settings.StartupDelaySeconds = StartupDelaySeconds;
+        if (!SaveSettings(settings))
+        {
+            _startMinimized = oldStartMinimized;
+            _startupDelaySeconds = oldStartupDelay;
+            OnPropertyChanged(nameof(StartMinimized));
+            OnPropertyChanged(nameof(StartupDelaySeconds));
+            return;
+        }
+
+        if (!AutoStartEnabled)
+        {
+            return;
+        }
+
+        try
+        {
+            _startupService.Configure(true, StartupDelaySeconds, StartMinimized);
+            StartupStatus = $"SleepOS starts at sign-in with a {StartupDelaySeconds}-second delay" +
+                (StartMinimized ? " and opens in the tray." : ".");
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or UnauthorizedAccessException or IOException or PlatformNotSupportedException or System.Security.SecurityException)
+        {
+            StartupStatus = $"Could not update Windows sign-in options: {exception.Message}";
+        }
+
+        OnPropertyChanged(nameof(StartupStatus));
+    }
+
+    private void SetSelectedProcessPriority(System.Diagnostics.ProcessPriorityClass priorityClass)
+    {
+        var selected = SelectedStoppableProcesses;
+        if (selected.Count == 0)
+        {
+            ProcessManagementStatus = "Select one or more eligible app processes first.";
+        }
+        else
+        {
+            var result = _processManagementService.SetPriority(selected, priorityClass);
+            ProcessManagementStatus = $"{result.UpdatedCount:N0} process(es) set to {priorityClass}.";
+            if (result.Failures.Count > 0)
+            {
+                ProcessManagementStatus += $" {result.Failures.Count:N0} could not be changed: {string.Join(" ", result.Failures.Take(2))}";
+            }
+        }
+
+        OnPropertyChanged(nameof(ProcessManagementStatus));
+    }
+
+    private void RefreshStartupStatus()
+    {
+        try
+        {
+            AutoStartEnabled = _startupService.IsEnabled;
+            StartupStatus = AutoStartEnabled
+                ? $"SleepOS starts at sign-in with a {StartupDelaySeconds}-second delay" +
+                    (StartMinimized ? " and opens in the tray." : ".")
+                : "SleepOS is not registered for Windows sign-in startup.";
+        }
+        catch (Exception exception) when (exception is UnauthorizedAccessException or IOException or System.Security.SecurityException or PlatformNotSupportedException)
+        {
+            StartupStatus = $"Could not read Windows sign-in startup: {exception.Message}";
+        }
+
+        OnPropertyChanged(nameof(AutoStartEnabled));
+        OnPropertyChanged(nameof(IsStartupDelayEnabled));
+        OnPropertyChanged(nameof(StartupStatus));
+    }
+
+    private PerformanceBenchmarkRecord CaptureBenchmarkSnapshot()
+    {
+        var metrics = _monitorService.Capture();
+        var backgroundProcesses = 0;
+        var uninspectedProcesses = 0;
+        foreach (var process in Process.GetProcesses())
+        {
+            try
+            {
+                if (process.Id != Environment.ProcessId && process.MainWindowHandle == IntPtr.Zero)
+                {
+                    backgroundProcesses++;
+                }
+            }
+            catch (Exception exception) when (exception is System.ComponentModel.Win32Exception or InvalidOperationException or UnauthorizedAccessException)
+            {
+                uninspectedProcesses++;
+            }
+            finally
+            {
+                process.Dispose();
+            }
+        }
+
+        var memoryLoad = metrics.RamUsedGb is { } used && metrics.TotalRamGb is { } total && total > 0
+            ? used / total * 100d
+            : (double?)null;
+        var measuredState = metrics.CpuUsagePercent is >= 85
+            ? "High CPU load"
+            : memoryLoad is >= 85
+                ? "High memory load"
+                : metrics.CpuUsagePercent is null && memoryLoad is null
+                    ? "Metrics unavailable"
+                    : "No high CPU or memory threshold observed";
+
+        return new PerformanceBenchmarkRecord
+        {
+            CapturedAt = DateTimeOffset.Now,
+            CpuUsagePercent = metrics.CpuUsagePercent,
+            RamUsedGb = metrics.RamUsedGb,
+            TotalRamGb = metrics.TotalRamGb,
+            BackgroundProcessCount = backgroundProcesses,
+            UninspectedProcessCount = uninspectedProcesses,
+            SystemState = $"{measuredState}; mode {_performanceMode}"
+        };
+    }
+
+    private static string FormatBenchmarkDifference(PerformanceBenchmarkRecord before, PerformanceBenchmarkRecord after)
+    {
+        var elapsed = after.CapturedAt - before.CapturedAt;
+        var cpuDifference = before.CpuUsagePercent is { } beforeCpu && after.CpuUsagePercent is { } afterCpu
+            ? $"{afterCpu - beforeCpu:+0.0;-0.0;0.0} percentage points CPU"
+            : "CPU unavailable";
+        var ramDifference = before.RamUsedGb is { } beforeRam && after.RamUsedGb is { } afterRam
+            ? $"{afterRam - beforeRam:+0.00;-0.00;0.00} GB RAM"
+            : "RAM unavailable";
+        var processDifference = after.BackgroundProcessCount - before.BackgroundProcessCount;
+        return $"Observed change since {before.CapturedAt.ToLocalTime():t} ({elapsed.TotalMinutes:F0} min): {cpuDifference}, {ramDifference}, {processDifference:+0;-0;0} background process(es). Latest scan could not inspect {after.UninspectedProcessCount:N0} process(es). Measurements only; this does not attribute changes to SleepOS or imply FPS gains.";
+    }
+
+    private void SchedulePerformanceAutomation(SystemMetrics metrics, IReadOnlyList<GameSession> runningGames)
+    {
+        if (_isClosing || DateTime.UtcNow - _lastAutomationRunUtc < TimeSpan.FromSeconds(30) ||
+            Interlocked.CompareExchange(ref _automationInProgress, 1, 0) != 0)
+        {
+            return;
+        }
+
+        var settings = _settingsStore.Load();
+        var games = runningGames
+            .Where(game => string.Equals(game.Status, "Running", StringComparison.OrdinalIgnoreCase))
+            .Select(game => game.Name)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var gameActive = games.Count > 0;
+        if (!settings.AutomaticMemorySaverEnabled &&
+            !(settings.AutomaticGamingModeEnabled && gameActive) &&
+            !settings.AutomaticHighCpuAnalysisEnabled &&
+            _automaticEfficiencyProcesses.Count == 0)
+        {
+            Interlocked.Exchange(ref _automationInProgress, 0);
+            return;
+        }
+
+        _lastAutomationRunUtc = DateTime.UtcNow;
+        _ = Task.Run(() =>
+        {
+            try
+            {
+                var scan = _processManagementService.GetStoppableProcesses(games);
+                if (settings.AutomaticHighCpuAnalysisEnabled && metrics.CpuUsagePercent is >= 85)
+                {
+                    var topCpuProcesses = scan.Processes
+                        .Where(process => process.CpuUsagePercent is not null)
+                        .OrderByDescending(process => process.CpuUsagePercent)
+                        .Take(3)
+                        .Select(process => $"{process.Name} {process.CpuUsagePercent:F1}%")
+                        .ToArray();
+                    var cpuMessage = topCpuProcesses.Length == 0
+                        ? "High total CPU load detected; per-process CPU readings are not available yet."
+                        : $"High total CPU load. Highest eligible process readings: {string.Join(", ", topCpuProcesses)}.";
+                    System.Windows.Application.Current?.Dispatcher.BeginInvoke(() =>
+                    {
+                        MemorySaverStatus = cpuMessage;
+                        OnPropertyChanged(nameof(MemorySaverStatus));
+                    });
+                }
+
+                var activeGameMode = runningGames
+                    .FirstOrDefault(game => string.Equals(game.Status, "Running", StringComparison.OrdinalIgnoreCase))
+                    ?.PerformanceMode ?? "Gaming";
+                var policyName = settings.AutomaticGamingModeEnabled && gameActive ? activeGameMode : _performanceMode;
+                var policy = PerformancePolicyRules.GetMode(policyName);
+                var memoryLoad = metrics.RamUsedGb is { } used && metrics.TotalRamGb is { } total && total > 0
+                    ? used / total * 100d
+                    : (double?)null;
+                var seen = new HashSet<(int ProcessId, long StartTimeTicks)>();
+
+                foreach (var process in scan.Processes)
+                {
+                    if (_isClosing)
+                    {
+                        break;
+                    }
+
+                    var key = (process.ProcessId, process.StartTimeUtcTicks);
+                    seen.Add(key);
+                    var rule = (settings.ManagedApplications ?? []).FirstOrDefault(candidate =>
+                        candidate.Enabled &&
+                        string.Equals(candidate.ExecutablePath, process.ExecutablePath, StringComparison.OrdinalIgnoreCase));
+                    var userOptedIn = rule is not null &&
+                        (settings.AutomaticGamingModeEnabled && gameActive || settings.AutomaticMemorySaverEnabled && policy.Name != "Gaming");
+                    var shouldApply = rule is not null && PerformancePolicyRules.ShouldEnableEfficiencyMode(
+                        policy,
+                        userOptedIn,
+                        isProtectedProcess: false,
+                        isGame: games.Contains(process.Name),
+                        hasVisibleWindow: process.HasVisibleWindow,
+                        isForeground: process.IsForeground,
+                        memoryLoadPercent: memoryLoad,
+                        inactiveFor: process.InactiveFor,
+                        inactivityThresholdMinutes: rule.InactivityMinutes,
+                        cpuLoadPercent: metrics.CpuUsagePercent);
+
+                    if (shouldApply)
+                    {
+                        var result = _processManagementService.SetEfficiencyMode([process], enabled: true);
+                        if (result.UpdatedCount > 0)
+                        {
+                            _automaticEfficiencyProcesses[key] = process;
+                        }
+                    }
+                    else if (_automaticEfficiencyProcesses.TryRemove(key, out _))
+                    {
+                        _processManagementService.SetEfficiencyMode([process], enabled: false);
+                    }
+                }
+
+                foreach (var key in _automaticEfficiencyProcesses.Keys.Where(key => !seen.Contains(key)).ToArray())
+                {
+                    _automaticEfficiencyProcesses.TryRemove(key, out _);
+                }
+            }
+            catch (Exception exception) when (exception is InvalidOperationException or UnauthorizedAccessException or IOException or System.ComponentModel.Win32Exception)
+            {
+                Trace.TraceError("Automatic SleepOS performance evaluation failed: {0}", exception);
+                System.Windows.Application.Current?.Dispatcher.BeginInvoke(() =>
+                {
+                    MemorySaverStatus = $"Automatic performance evaluation failed: {exception.Message}";
+                    OnPropertyChanged(nameof(MemorySaverStatus));
+                });
+            }
+            finally
+            {
+                if (_isClosing)
+                {
+                    _processManagementService.RestoreEfficiencyModes();
+                }
+
+                Interlocked.Exchange(ref _automationInProgress, 0);
+            }
+        });
+    }
+
     private static string FormatPercent(double? value) => value is { } percent ? $"{percent:F0}%" : "N/A";
 
     private static string FormatGigabytes(double? value) => value is { } gigabytes ? $"{gigabytes:F1} GB" : "N/A";
@@ -980,14 +1677,41 @@ public partial class MainWindowViewModel : ObservableObject
     private void UpdateSettings(AppSettings settings)
     {
         _performanceMode = GetPerformanceMode(settings);
-        GamingModeEnabled = string.Equals(_performanceMode, "Game focus", StringComparison.Ordinal);
+        GamingModeEnabled = string.Equals(_performanceMode, "Gaming", StringComparison.Ordinal);
         AutoRefreshEnabled = settings.AutoRefreshEnabled;
-        GamingModeText = GamingModeEnabled ? "Game focus: On (SleepOS only)" : "Game focus: Off";
+        GamingModeText = GamingModeEnabled ? "Gaming policy: On" : "Gaming policy: Off";
         CurrentProfile = NormalizeProfileName(settings.LastSelectedProfile);
         _accentTheme = NormalizeAccentTheme(settings.AccentTheme);
         _colorMode = NormalizeColorMode(settings.ColorMode);
         _metricsRefreshSeconds = NormalizeMetricsRefreshSeconds(settings.MetricsRefreshSeconds);
         _pageAnimationsEnabled = settings.PageAnimationsEnabled;
+        AutoStartEnabled = settings.AutoStartEnabled;
+        _startMinimized = settings.StartMinimized;
+        _startupDelaySeconds = StartupDelayOptions.Contains(settings.StartupDelaySeconds) ? settings.StartupDelaySeconds : 0;
+        OnPropertyChanged(nameof(StartMinimized));
+        OnPropertyChanged(nameof(StartupDelaySeconds));
+        AutomaticMemorySaverEnabled = settings.AutomaticMemorySaverEnabled;
+        AutomaticGamingModeEnabled = settings.AutomaticGamingModeEnabled;
+        AutomaticHighCpuAnalysisEnabled = settings.AutomaticHighCpuAnalysisEnabled;
+        ManagedApplications.Clear();
+        foreach (var rule in settings.ManagedApplications ?? [])
+        {
+            if (!string.IsNullOrWhiteSpace(rule.ExecutablePath))
+            {
+                ManagedApplications.Add(rule);
+            }
+        }
+        UpdateGameProcessProfiles(settings.GameProfiles ?? []);
+        GameProfileStatus = GameProcessProfiles.Count == 0
+            ? "Add a running app from Background apps to recognize it as a game."
+            : $"{GameProcessProfiles.Count:N0} custom game profile(s) loaded. Automatic switching is separately configurable.";
+        OnPropertyChanged(nameof(GameProfileStatus));
+
+        BenchmarkHistory.Clear();
+        foreach (var record in (settings.BenchmarkHistory ?? []).TakeLast(20).Reverse())
+        {
+            BenchmarkHistory.Add(record);
+        }
     }
 
     private static void MarkPerformanceModeCustom(AppSettings settings)
@@ -999,9 +1723,11 @@ public partial class MainWindowViewModel : ObservableObject
     private static string NormalizePerformanceMode(string? mode) => mode?.Trim().ToLowerInvariant() switch
     {
         "balanced" => "Balanced",
-        "game focus" => "Game focus",
-        "low activity" => "Low activity",
-        _ => "Custom"
+        "gaming" or "game focus" => "Gaming",
+        "extreme performance" => "Extreme Performance",
+        "battery saver" or "low activity" => "Battery Saver",
+        "custom" => "Custom",
+        _ => "Balanced"
     };
 
     private static string GetPerformanceMode(AppSettings settings)
@@ -1010,8 +1736,9 @@ public partial class MainWindowViewModel : ObservableObject
         var matchesMode = savedMode switch
         {
             "Balanced" => settings.AutoRefreshEnabled && settings.MetricsRefreshSeconds == 5 && settings.PageAnimationsEnabled,
-            "Game focus" => !settings.AutoRefreshEnabled && settings.MetricsRefreshSeconds == 30 && !settings.PageAnimationsEnabled,
-            "Low activity" => settings.AutoRefreshEnabled && settings.MetricsRefreshSeconds == 30 && !settings.PageAnimationsEnabled,
+            "Gaming" => settings.AutoRefreshEnabled && settings.MetricsRefreshSeconds == 10 && !settings.PageAnimationsEnabled,
+            "Extreme Performance" => !settings.AutoRefreshEnabled && settings.MetricsRefreshSeconds == 30 && !settings.PageAnimationsEnabled,
+            "Battery Saver" => settings.AutoRefreshEnabled && settings.MetricsRefreshSeconds == 30 && !settings.PageAnimationsEnabled,
             _ => false
         };
         return matchesMode ? savedMode : "Custom";
@@ -1047,6 +1774,14 @@ public partial class MainWindowViewModel : ObservableObject
         _ => 5
     };
 
+    private static string NormalizeGamePerformanceMode(string? mode) => mode?.Trim().ToLowerInvariant() switch
+    {
+        "balanced" => "Balanced",
+        "extreme performance" => "Extreme Performance",
+        "battery saver" => "Battery Saver",
+        _ => "Gaming"
+    };
+
     private static string NormalizeProfileName(string? profileName) => profileName switch
     {
         "Balanced" or "Custom" => "Balanced",
@@ -1061,6 +1796,26 @@ public partial class MainWindowViewModel : ObservableObject
         {
             Profiles.Add(profile);
         }
+    }
+
+    private IReadOnlyList<GameSession> GetRunningGames()
+    {
+        return _gameService.GetRunningGames(_settingsStore.Load().GameProfiles ?? []);
+    }
+
+    private void UpdateGameProcessProfiles(IEnumerable<GamePerformanceProfile> profiles)
+    {
+        GameProcessProfiles.Clear();
+        foreach (var profile in profiles
+                     .Where(profile => !string.IsNullOrWhiteSpace(profile.ExecutablePath))
+                     .DistinctBy(profile => profile.ExecutablePath, StringComparer.OrdinalIgnoreCase)
+                     .OrderBy(profile => profile.ProcessName, StringComparer.OrdinalIgnoreCase))
+        {
+            profile.PerformanceMode = NormalizeGamePerformanceMode(profile.PerformanceMode);
+            GameProcessProfiles.Add(profile);
+        }
+
+        OnPropertyChanged(nameof(GameProcessProfiles));
     }
 
 }
