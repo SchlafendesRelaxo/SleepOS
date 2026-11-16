@@ -1101,9 +1101,9 @@
                                         <StackPanel VerticalAlignment="Center" Margin="0,0,24,0">
                                             <TextBlock Text="PERFORMANCE  /  BACKGROUND APPS" Foreground="{DynamicResource AccentBrush}"
                                                        FontSize="10" FontWeight="Bold"/>
-                                            <TextBlock Text="Clear the noise." Foreground="{DynamicResource TextBrush}"
+                                            <TextBlock Text="App memory &amp; activity" Foreground="{DynamicResource TextBrush}"
                                                        FontSize="32" FontWeight="Bold" Margin="0,8,0,0"/>
-                                            <TextBlock Text="Hidden background apps are highlighted for review. Memory use alone never makes an app a candidate."
+                                            <TextBlock Text="Review each app's working set and activity. Select apps below before applying an action."
                                                        Foreground="{DynamicResource HeroSubtitleBrush}" FontSize="13" TextWrapping="Wrap" Margin="0,8,0,0"/>
                                         </StackPanel>
                                         <Button Grid.Column="1" Content="Scan apps" Style="{StaticResource ActionButton}"
@@ -1112,12 +1112,51 @@
                                     </Grid>
                                 </Border>
 
+                                <UniformGrid Columns="3" Margin="0,0,0,14">
+                                    <Border Style="{StaticResource CardStyle}" Margin="0,0,7,0" Padding="16">
+                                        <StackPanel>
+                                            <TextBlock Text="APP PROCESSES" Foreground="{DynamicResource MutedBrush}"
+                                                       FontSize="10" FontWeight="Bold"/>
+                                            <TextBlock Text="{Binding ManageableProcessCount}" Foreground="{DynamicResource TextBrush}"
+                                                       FontSize="25" FontWeight="Bold" Margin="0,5,0,0"/>
+                                        </StackPanel>
+                                    </Border>
+                                    <Border Style="{StaticResource CardStyle}" Margin="7,0" Padding="16">
+                                        <StackPanel>
+                                            <TextBlock Text="TO REVIEW" Foreground="{DynamicResource MutedBrush}"
+                                                       FontSize="10" FontWeight="Bold"/>
+                                            <TextBlock Text="{Binding RecommendedProcessCount}" Foreground="{DynamicResource ReviewBrush}"
+                                                       FontSize="25" FontWeight="Bold" Margin="0,5,0,0"/>
+                                        </StackPanel>
+                                    </Border>
+                                    <Border Style="{StaticResource CardStyle}" Margin="7,0,0,0" Padding="16">
+                                        <StackPanel>
+                                            <TextBlock Text="LISTED WORKING SET" Foreground="{DynamicResource MutedBrush}"
+                                                       FontSize="10" FontWeight="Bold"/>
+                                            <TextBlock Text="{Binding ManageableProcessWorkingSetText}" Foreground="{DynamicResource AccentBrush}"
+                                                       FontSize="25" FontWeight="Bold" Margin="0,5,0,0"/>
+                                        </StackPanel>
+                                    </Border>
+                                </UniformGrid>
+
                                 <Border Style="{StaticResource CardStyle}" Margin="0,0,0,14">
                                     <StackPanel>
-                                        <TextBlock Text="Smart Memory Saver" Style="{StaticResource SectionTitle}" FontSize="17"/>
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="Auto"/>
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock Text="Smart Memory Saver" Style="{StaticResource SectionTitle}" FontSize="17"/>
+                                            <Border Grid.Column="1" Background="{DynamicResource ControlBrush}"
+                                                    BorderBrush="{DynamicResource ControlBorderBrush}" BorderThickness="1"
+                                                    CornerRadius="10" Padding="9,4">
+                                                <TextBlock Text="OPT-IN" Foreground="{DynamicResource AccentBrush}"
+                                                           FontSize="9" FontWeight="Bold"/>
+                                            </Border>
+                                        </Grid>
                                         <TextBlock Text="{Binding MemorySaverStatus}" Foreground="{DynamicResource MutedBrush}"
                                                    Margin="0,6,0,0" TextWrapping="Wrap"/>
-                                        <TextBlock Text="EcoQoS reduces CPU/power scheduling for opted-in inactive apps; it does not force-release allocated RAM. SleepOS never suspends or terminates apps for Memory Saver."
+                                        <TextBlock Text="EcoQoS changes CPU/power scheduling, not RAM allocation. A working-set trim below can free resident pages temporarily; Windows or the app may bring them back."
                                                    Foreground="{DynamicResource MutedBrush}" FontSize="11" TextWrapping="Wrap" Margin="0,5,0,0"/>
                                         <StackPanel Orientation="Horizontal" Margin="0,12,0,12">
                                             <Button Content="Add selected apps" Style="{StaticResource ActionButton}"
@@ -1180,9 +1219,26 @@
                                             <StackPanel Grid.Row="1" Grid.ColumnSpan="2" Margin="0,6,0,0">
                                                 <TextBlock Text="Windows-folder processes, Windows services, SleepOS, visible apps, and recognized active games are not suggested. All other hidden apps are listed for review; a hidden process may still be required by another app."
                                                            Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap"/>
-                                                <TextBlock Text="Rows include description, publisher metadata, path, PID, CPU, RAM, and priority. RAM does not affect suggestions. Stop selected closes only those PIDs; unsaved work may be lost."
+                                                <TextBlock Text="Rows show CPU, working set, PID, priority, and app details. Hover the app details to see the executable path. Memory use alone never makes an app a candidate. Stop selected closes only those PIDs; unsaved work may be lost."
                                                            Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" Margin="0,6,0,0"/>
                                             </StackPanel>
+                                        </Grid>
+                                        <Grid Margin="8,14,8,7">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="44"/>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="Auto"/>
+                                                <ColumnDefinition Width="Auto"/>
+                                                <ColumnDefinition Width="Auto"/>
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock Grid.Column="1" Text="APPLICATION / DETAILS" Foreground="{DynamicResource MutedBrush}"
+                                                       FontSize="9" FontWeight="Bold"/>
+                                            <TextBlock Grid.Column="2" Text="PID" Foreground="{DynamicResource MutedBrush}"
+                                                       FontSize="9" FontWeight="Bold" Margin="12,0"/>
+                                            <TextBlock Grid.Column="3" Text="WORKING SET" Foreground="{DynamicResource MutedBrush}"
+                                                       FontSize="9" FontWeight="Bold" TextAlignment="Right" MinWidth="72"/>
+                                            <TextBlock Grid.Column="4" Text="CPU / STATE" Foreground="{DynamicResource MutedBrush}"
+                                                       FontSize="9" FontWeight="Bold" Margin="12,0,0,0"/>
                                         </Grid>
                                         <ListView ItemsSource="{Binding ManageableProcesses}" Background="{DynamicResource ListBrush}"
                                                   BorderBrush="{DynamicResource LineBrush}" BorderThickness="1"
@@ -1241,15 +1297,12 @@
                                                             </TextBlock>
                                                             <TextBlock Text="{Binding RecommendationDetails}" Foreground="{DynamicResource MutedBrush}"
                                                                        FontSize="10" TextWrapping="Wrap" Margin="22,2,12,0"/>
-                                                            <TextBlock Text="{Binding ExecutablePath}" Foreground="{DynamicResource MutedBrush}"
-                                                                       FontSize="10" TextTrimming="CharacterEllipsis" ToolTip="{Binding ExecutablePath}"
-                                                                       Margin="22,3,12,0"/>
                                                         </StackPanel>
                                                         <TextBlock Grid.Column="2" Text="{Binding ProcessId, StringFormat=PID {0}}"
                                                                    Foreground="{DynamicResource MutedBrush}" VerticalAlignment="Center" Margin="12,0"/>
                                                         <TextBlock Grid.Column="3" Text="{Binding MemoryMb, StringFormat={}{0:F1} MB}"
-                                                                   Foreground="{DynamicResource AccentBrush}" VerticalAlignment="Center" MinWidth="72"
-                                                                   TextAlignment="Right"/>
+                                                                   Foreground="{DynamicResource AccentBrush}" VerticalAlignment="Center"
+                                                                   MinWidth="72" FontSize="13" FontWeight="SemiBold" TextAlignment="Right"/>
                                                         <StackPanel Grid.Column="4" Margin="12,0,0,0" VerticalAlignment="Center">
                                                             <TextBlock Text="{Binding CpuUsageText}"
                                                                        Foreground="{DynamicResource MutedBrush}" FontSize="10"/>
@@ -1262,27 +1315,36 @@
                                                 </DataTemplate>
                                             </ListView.ItemTemplate>
                                         </ListView>
-                                        <TextBlock Text="Tick the app checkboxes above, then choose an action. EcoQoS and priority affect CPU scheduling; Trim selected RAM requests a temporary working-set trim."
-                                                   Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" Margin="0,12,0,4"/>
-                                        <TextBlock Text="{Binding ProcessManagementStatus}" Foreground="{DynamicResource AccentBrush}"
-                                                   TextWrapping="Wrap" Margin="0,0,0,10"/>
-                                        <WrapPanel>
-                                            <Button Content="Add selected to game profiles" Style="{StaticResource ActionButton}"
-                                                    Command="{Binding AddSelectedToGameProfilesCommand}" Margin="0,0,8,8"/>
-                                            <Button Content="Apply EcoQoS" Style="{StaticResource ActionButton}"
-                                                    Command="{Binding ApplyEfficiencyModeToSelectedCommand}" Margin="0,0,8,8"/>
-                                            <Button Content="Restore policy" Style="{StaticResource ActionButton}"
-                                                    Command="{Binding RestoreEfficiencyModeForSelectedCommand}" Margin="0,0,8,8"/>
-                                            <Button Content="Set BelowNormal priority" Style="{StaticResource ActionButton}"
-                                                    Command="{Binding SetSelectedProcessesToBelowNormalCommand}" Margin="0,0,8,8"/>
-                                            <Button Content="Restore priority" Style="{StaticResource ActionButton}"
-                                                    Command="{Binding RestoreSelectedProcessPrioritiesCommand}" Margin="0,0,8,8"/>
-                                            <Button Content="Trim selected RAM" Style="{StaticResource ActionButton}"
-                                                    Click="TrimSelectedProcessesMemory_Click" Margin="0,0,8,8"/>
-                                            <Button Content="Stop selected" Style="{StaticResource ActionButton}"
-                                                    Click="StopSelectedProcesses_Click" Background="{DynamicResource DangerBrush}"
-                                                    BorderBrush="{DynamicResource DangerBorderBrush}" Foreground="{DynamicResource DangerTextBrush}"/>
-                                        </WrapPanel>
+                                        <Border Background="{DynamicResource ListBrush}" BorderBrush="{DynamicResource LineBrush}"
+                                                BorderThickness="1" CornerRadius="12" Padding="14" Margin="0,14,0,0">
+                                            <StackPanel>
+                                                <TextBlock Text="Selected app actions" Style="{StaticResource SectionTitle}" FontSize="14"/>
+                                                <TextBlock Text="Tick app checkboxes above. EcoQoS and priority affect CPU scheduling; working-set trim is temporary."
+                                                           Foreground="{DynamicResource MutedBrush}" FontSize="11"
+                                                           TextWrapping="Wrap" Margin="0,5,0,0"/>
+                                                <TextBlock Text="{Binding ProcessManagementStatus}" Foreground="{DynamicResource AccentBrush}"
+                                                           TextWrapping="Wrap" Margin="0,8,0,10"/>
+                                                <WrapPanel>
+                                                    <Button Content="Add to game profiles" Style="{StaticResource ActionButton}"
+                                                            Command="{Binding AddSelectedToGameProfilesCommand}" Margin="0,0,8,8"/>
+                                                    <Button Content="Apply EcoQoS" Style="{StaticResource ActionButton}"
+                                                            Command="{Binding ApplyEfficiencyModeToSelectedCommand}" Margin="0,0,8,8"/>
+                                                    <Button Content="Restore policy" Style="{StaticResource ActionButton}"
+                                                            Command="{Binding RestoreEfficiencyModeForSelectedCommand}" Margin="0,0,8,8"/>
+                                                    <Button Content="Set BelowNormal priority" Style="{StaticResource ActionButton}"
+                                                            Command="{Binding SetSelectedProcessesToBelowNormalCommand}" Margin="0,0,8,8"/>
+                                                    <Button Content="Restore priority" Style="{StaticResource ActionButton}"
+                                                            Command="{Binding RestoreSelectedProcessPrioritiesCommand}" Margin="0,0,8,8"/>
+                                                    <Button Content="Trim working set" ToolTip="Temporarily asks Windows to remove resident pages from selected background apps."
+                                                            Style="{StaticResource ActionButton}" Click="TrimSelectedProcessesMemory_Click"
+                                                            Margin="0,0,8,8" Background="{DynamicResource AccentBrush}"
+                                                            BorderBrush="{DynamicResource AccentBrush}"/>
+                                                    <Button Content="Stop selected" Style="{StaticResource ActionButton}"
+                                                            Click="StopSelectedProcesses_Click" Background="{DynamicResource DangerBrush}"
+                                                            BorderBrush="{DynamicResource DangerBorderBrush}" Foreground="{DynamicResource DangerTextBrush}"/>
+                                                </WrapPanel>
+                                            </StackPanel>
+                                        </Border>
                                     </StackPanel>
                                 </Border>
                             </StackPanel>

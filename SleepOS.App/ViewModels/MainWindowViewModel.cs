@@ -330,6 +330,7 @@ public partial class MainWindowViewModel : ObservableObject
 
     public int ManageableProcessCount => ManageableProcesses.Count;
     public int RecommendedProcessCount => ManageableProcesses.Count(process => process.IsSuggestedForReview);
+    public string ManageableProcessWorkingSetText => $"{ManageableProcesses.Sum(process => process.MemoryMb):N0} MB";
     public IReadOnlyList<ManagedProcessCandidate> SelectedStoppableProcesses =>
         ManageableProcesses.Where(process => process.IsSelected).ToArray();
     public string GamingModeStatus => GamingModeEnabled ? "On • SleepOS polling and display policy" : "Off";
@@ -889,6 +890,7 @@ public partial class MainWindowViewModel : ObservableObject
         ManageableProcesses.Clear();
         OnPropertyChanged(nameof(ManageableProcessCount));
         OnPropertyChanged(nameof(RecommendedProcessCount));
+        OnPropertyChanged(nameof(ManageableProcessWorkingSetText));
         OnPropertyChanged(nameof(ProcessManagementStatus));
 
         try
@@ -939,6 +941,7 @@ public partial class MainWindowViewModel : ObservableObject
 
         OnPropertyChanged(nameof(ManageableProcessCount));
         OnPropertyChanged(nameof(RecommendedProcessCount));
+        OnPropertyChanged(nameof(ManageableProcessWorkingSetText));
         OnPropertyChanged(nameof(ProcessManagementStatus));
     }
 
