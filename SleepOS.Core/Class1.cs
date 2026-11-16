@@ -90,9 +90,13 @@ public sealed class OptimizationProfile
 public sealed class DashboardMetricCard
 {
     public string Title { get; set; } = string.Empty;
+    public string Icon { get; set; } = string.Empty;
     public string Value { get; set; } = string.Empty;
     public string Detail { get; set; } = string.Empty;
     public string Accent { get; set; } = "#A855F7";
+    public double? Percent { get; set; }
+    public IReadOnlyList<double> Trend { get; set; } = Array.Empty<double>();
+    public string TrendSummary { get; set; } = "Waiting for readings.";
 }
 
 public sealed class RecentOptimizationEntry

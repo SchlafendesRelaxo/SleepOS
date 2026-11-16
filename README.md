@@ -4,6 +4,12 @@ SleepOS is a Windows desktop application for system monitoring, maintenance, and
 
 ## Features
 
+### Interface
+
+- Use the collapsible dark-purple sidebar to open Dashboard, Performance, Memory Saver, Application Manager, Gaming Optimizer, Benchmark, Automations, Autostart, and Settings. Existing Windows care, hardware, and network tools remain available.
+- Review live CPU, RAM, GPU, and CPU-temperature readings. Unsupported readings remain marked as unavailable; dashboard sparklines and the selectable RAM history are built from real samples collected during the current session.
+- Search SleepOS settings; filter processes by name, publisher, executable path, or PID, and sort by memory, CPU, or name.
+
 ### Monitor and manage apps
 
 - View system CPU and RAM readings and inspect eligible app processes, including their executable icon, CPU use, working set, PID, priority, and foreground/background state.

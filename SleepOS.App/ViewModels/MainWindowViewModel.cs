@@ -6,6 +6,9 @@ using System.Collections.ObjectModel;
 using System.Net.Http;
 using System.Net.NetworkInformation;
 using System.Net.Sockets;
+using System.Windows;
+using System.Windows.Data;
+using System.Windows.Media;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using SleepOS.Core;
@@ -43,8 +46,13 @@ public partial class MainWindowViewModel : ObservableObject
     private readonly ConcurrentDictionary<(int ProcessId, long StartTimeTicks), ManagedProcessCandidate> _automaticEfficiencyProcesses = new();
     private readonly ConcurrentDictionary<(int ProcessId, long StartTimeTicks), DateTime> _automaticWorkingSetTrimmedAtUtc = new();
     private static readonly TimeSpan AutomaticWorkingSetTrimCooldown = TimeSpan.FromMinutes(30);
+    private readonly Queue<MetricHistorySample> _metricHistory = new();
+    private const int MaximumMetricHistorySamples = 720;
     private bool _startMinimized;
     private int _startupDelaySeconds;
+    private string _selectedHistoryRange = "5 minutes";
+    private string _processFilterText = string.Empty;
+    private string _processSortBy = "Memory";
 
     public MainWindowViewModel(
         ISystemMonitorService monitorService,
@@ -71,6 +79,9 @@ public partial class MainWindowViewModel : ObservableObject
         _desktopShortcutService = desktopShortcutService;
         _startupService = startupService;
 
+        ManageableProcessesView = CollectionViewSource.GetDefaultView(ManageableProcesses);
+        ManageableProcessesView.Filter = MatchesProcessFilter;
+        ApplyProcessSort();
         UpdateSettings(_settingsStore.Load());
         LoadProfiles();
         RefreshStartupStatus();
@@ -82,6 +93,7 @@ public partial class MainWindowViewModel : ObservableObject
     public ObservableCollection<OptimizationProfile> Profiles { get; } = new();
     public ObservableCollection<ProcessPerformance> RunningProcesses { get; } = new();
     public ObservableCollection<ManagedProcessCandidate> ManageableProcesses { get; } = new();
+    public ICollectionView ManageableProcessesView { get; }
     public ObservableCollection<ApplicationPerformanceRule> ManagedApplications { get; } = new();
     public ObservableCollection<PerformanceBenchmarkRecord> BenchmarkHistory { get; } = new();
     public ObservableCollection<GamePerformanceProfile> GameProcessProfiles { get; } = new();
@@ -101,6 +113,59 @@ public partial class MainWindowViewModel : ObservableObject
     public IReadOnlyList<int> MemorySaverInactivityOptions { get; } = [1, 5, 10, 20, 30, 60];
     public IReadOnlyList<int> StartupDelayOptions { get; } = [0, 5, 10, 30, 60, 120, 300];
     public IReadOnlyList<string> GamePerformanceModeOptions { get; } = ["Balanced", "Gaming", "Extreme Performance", "Battery Saver"];
+    public IReadOnlyList<string> ProcessSortOptions { get; } = ["Memory", "CPU", "Name"];
+    public IReadOnlyList<string> HistoryRangeOptions { get; } = ["5 minutes", "15 minutes", "1 hour"];
+    public PointCollection RamHistoryPoints { get; private set; } = new();
+    public string RamHistoryStatus { get; private set; } = "Collecting live readings for this session.";
+    public string RamHistoryTooltip { get; private set; } = "RAM history will appear as Windows readings are collected.";
+    public string RamHistoryCurrentText { get; private set; } = "Waiting for a reading";
+    public string SelectedHistoryRange
+    {
+        get => _selectedHistoryRange;
+        set
+        {
+            if (string.Equals(_selectedHistoryRange, value, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            _selectedHistoryRange = value;
+            OnPropertyChanged();
+            UpdateRamHistoryChart();
+        }
+    }
+    public string ProcessFilterText
+    {
+        get => _processFilterText;
+        set
+        {
+            if (string.Equals(_processFilterText, value, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            _processFilterText = value;
+            OnPropertyChanged();
+            ManageableProcessesView.Refresh();
+        }
+    }
+
+    public string ProcessSortBy
+    {
+        get => _processSortBy;
+        set
+        {
+            var normalized = ProcessSortOptions.Contains(value) ? value : "Memory";
+            if (string.Equals(_processSortBy, normalized, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            _processSortBy = normalized;
+            OnPropertyChanged();
+            ApplyProcessSort();
+        }
+    }
 
     public string Greeting { get; set; } = "Good evening, gamer";
     public string SystemStatus { get; set; } = "Nominal";
@@ -385,6 +450,7 @@ public partial class MainWindowViewModel : ObservableObject
     {
         var metrics = _monitorService.Capture();
         var settings = _settingsStore.Load();
+        RecordMetricHistory(metrics);
 
         Greeting = DateTime.Now.Hour switch
         {
@@ -403,12 +469,49 @@ public partial class MainWindowViewModel : ObservableObject
         NetworkThroughputStatus = $"Download {FormatSpeed(metrics.DownloadMbps)} • Upload {FormatSpeed(metrics.UploadMbps)}";
 
         HardwareCards.Clear();
-        HardwareCards.Add(new DashboardMetricCard { Title = "CPU", Value = FormatPercent(metrics.CpuUsagePercent), Detail = "Usage • temperature unavailable", Accent = "#A855F7" });
-        HardwareCards.Add(new DashboardMetricCard { Title = "GPU", Value = FormatPercent(metrics.GpuUsagePercent), Detail = "Highest engine • temperature unavailable", Accent = "#8B5CF6" });
-        HardwareCards.Add(new DashboardMetricCard { Title = "RAM", Value = FormatGigabytes(metrics.RamUsedGb), Detail = metrics.TotalRamGb is { } totalRam ? $"of {totalRam:F1} GB" : "Total unavailable", Accent = "#C084FC" });
-        HardwareCards.Add(new DashboardMetricCard { Title = "VRAM", Value = "N/A", Detail = "Not exposed by Windows", Accent = "#A78BFA" });
-        HardwareCards.Add(new DashboardMetricCard { Title = "System drive", Value = FormatPercent(metrics.DiskUsagePercent), Detail = "Capacity used • not drive health", Accent = "#7C3AED" });
-        HardwareCards.Add(new DashboardMetricCard { Title = "Network", Value = FormatSpeed(metrics.DownloadMbps), Detail = $"↑ {FormatSpeed(metrics.UploadMbps)} upload", Accent = "#8B5CF6" });
+        HardwareCards.Add(new DashboardMetricCard
+        {
+            Title = "CPU",
+            Icon = "\uE9D9",
+            Value = FormatPercent(metrics.CpuUsagePercent),
+            Detail = "Current processor load",
+            Accent = "#8B35FF",
+            Percent = metrics.CpuUsagePercent,
+            Trend = GetMetricTrend(sample => sample.CpuUsagePercent),
+            TrendSummary = GetMetricTrendSummary(sample => sample.CpuUsagePercent, "%")
+        });
+        HardwareCards.Add(new DashboardMetricCard
+        {
+            Title = "RAM",
+            Icon = "\uE950",
+            Value = FormatGigabytes(metrics.RamUsedGb),
+            Detail = GetMemoryDetail(metrics),
+            Accent = "#B66AFF",
+            Percent = GetMemoryUsagePercent(metrics),
+            Trend = GetMetricTrend(sample => sample.RamUsagePercent),
+            TrendSummary = GetMetricTrendSummary(sample => sample.RamUsagePercent, "%")
+        });
+        HardwareCards.Add(new DashboardMetricCard
+        {
+            Title = "GPU",
+            Icon = "\uE7F4",
+            Value = FormatPercent(metrics.GpuUsagePercent),
+            Detail = "Reported engine utilization",
+            Accent = "#8B35FF",
+            Percent = metrics.GpuUsagePercent,
+            Trend = GetMetricTrend(sample => sample.GpuUsagePercent),
+            TrendSummary = GetMetricTrendSummary(sample => sample.GpuUsagePercent, "%")
+        });
+        HardwareCards.Add(new DashboardMetricCard
+        {
+            Title = "CPU temperature",
+            Icon = "\uE9CA",
+            Value = metrics.CpuTemperatureC is { } temperature ? $"{temperature:F0} °C" : "N/A",
+            Detail = metrics.CpuTemperatureC is null ? "No supported Windows sensor" : "Reported by Windows",
+            Accent = "#B66AFF",
+            Trend = GetMetricTrend(sample => sample.CpuTemperatureC),
+            TrendSummary = GetMetricTrendSummary(sample => sample.CpuTemperatureC, " °C")
+        });
 
         RunningProcesses.Clear();
         foreach (var process in metrics.RunningProcesses)
@@ -454,6 +557,125 @@ public partial class MainWindowViewModel : ObservableObject
         OnPropertyChanged(nameof(AutoRefreshStatus));
         OnPropertyChanged(nameof(NetworkThroughputStatus));
         SchedulePerformanceAutomation(metrics, runningGames);
+    }
+
+    private void RecordMetricHistory(SystemMetrics metrics)
+    {
+        _metricHistory.Enqueue(new MetricHistorySample(
+            DateTimeOffset.Now,
+            metrics.CpuUsagePercent,
+            GetMemoryUsagePercent(metrics),
+            metrics.GpuUsagePercent,
+            metrics.CpuTemperatureC,
+            metrics.RamUsedGb,
+            metrics.TotalRamGb));
+
+        while (_metricHistory.Count > MaximumMetricHistorySamples)
+        {
+            _metricHistory.Dequeue();
+        }
+
+        UpdateRamHistoryChart();
+    }
+
+    private void UpdateRamHistoryChart()
+    {
+        var range = _selectedHistoryRange switch
+        {
+            "15 minutes" => TimeSpan.FromMinutes(15),
+            "1 hour" => TimeSpan.FromHours(1),
+            _ => TimeSpan.FromMinutes(5)
+        };
+        var samples = _metricHistory
+            .Where(sample => sample.CapturedAt >= DateTimeOffset.Now - range && sample.RamUsagePercent is not null)
+            .ToArray();
+        var points = new PointCollection(samples.Length);
+        for (var index = 0; index < samples.Length; index++)
+        {
+            var x = samples.Length < 2 ? 0 : 600d * index / (samples.Length - 1);
+            var percentage = Math.Clamp(samples[index].RamUsagePercent!.Value, 0, 100);
+            var y = 116 - percentage * 1.08;
+            points.Add(new System.Windows.Point(x, y));
+        }
+
+        RamHistoryPoints = points;
+        RamHistoryStatus = samples.Length < 2
+            ? "Collecting live readings. History starts with this session."
+            : $"{samples.Length:N0} real Windows readings • {SelectedHistoryRange} • updated {samples[^1].CapturedAt.ToLocalTime():t}";
+        RamHistoryCurrentText = samples.LastOrDefault() is { } latest
+            ? $"{latest.RamUsedGb?.ToString("F1") ?? "N/A"} GB / {latest.RamUsagePercent?.ToString("F0") ?? "N/A"}%"
+            : "Waiting for a reading";
+        RamHistoryTooltip = samples.Length == 0
+            ? "RAM history will appear as Windows readings are collected."
+            : string.Join(Environment.NewLine, samples.TakeLast(8).Reverse().Select(sample =>
+                $"{sample.CapturedAt.ToLocalTime():t}  •  {sample.RamUsedGb?.ToString("F2") ?? "N/A"} GB used  •  {sample.RamUsagePercent?.ToString("F1") ?? "N/A"}%"));
+        OnPropertyChanged(nameof(RamHistoryPoints));
+        OnPropertyChanged(nameof(RamHistoryStatus));
+        OnPropertyChanged(nameof(RamHistoryTooltip));
+        OnPropertyChanged(nameof(RamHistoryCurrentText));
+    }
+
+    private IReadOnlyList<double> GetMetricTrend(Func<MetricHistorySample, double?> selector) =>
+        _metricHistory
+            .TakeLast(60)
+            .Select(selector)
+            .Where(value => value is not null)
+            .Select(value => value!.Value)
+            .ToArray();
+
+    private string GetMetricTrendSummary(Func<MetricHistorySample, double?> selector, string unit)
+    {
+        var values = _metricHistory.TakeLast(60).Select(selector).Where(value => value is not null).Select(value => value!.Value).ToArray();
+        return values.Length == 0
+            ? "Waiting for real readings."
+            : $"Recent readings: {values.Min():F1}{unit} to {values.Max():F1}{unit}; latest {values[^1]:F1}{unit}.";
+    }
+
+    private static double? GetMemoryUsagePercent(SystemMetrics metrics)
+    {
+        if (metrics.RamUsedGb is { } used && metrics.TotalRamGb is { } total && total > 0)
+        {
+            return Math.Clamp(used / total * 100, 0, 100);
+        }
+
+        return null;
+    }
+
+    private static string GetMemoryDetail(SystemMetrics metrics) =>
+        metrics.TotalRamGb is { } total && total > 0 && GetMemoryUsagePercent(metrics) is { } percentage
+            ? $"{percentage:F0}% of {total:F1} GB in use"
+            : "Total memory unavailable";
+
+    private bool MatchesProcessFilter(object item)
+    {
+        if (item is not ManagedProcessCandidate process)
+        {
+            return false;
+        }
+
+        var terms = _processFilterText.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        return terms.All(term =>
+            process.Name.Contains(term, StringComparison.OrdinalIgnoreCase) ||
+            process.ExecutablePath.Contains(term, StringComparison.OrdinalIgnoreCase) ||
+            process.ProductDescription.Contains(term, StringComparison.OrdinalIgnoreCase) ||
+            process.Publisher.Contains(term, StringComparison.OrdinalIgnoreCase) ||
+            process.ProcessId.ToString().Contains(term, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private void ApplyProcessSort()
+    {
+        ManageableProcessesView.SortDescriptions.Clear();
+        var propertyName = _processSortBy switch
+        {
+            "CPU" => nameof(ManagedProcessCandidate.CpuUsagePercent),
+            "Name" => nameof(ManagedProcessCandidate.Name),
+            _ => nameof(ManagedProcessCandidate.MemoryMb)
+        };
+        var direction = _processSortBy == "Name"
+            ? ListSortDirection.Ascending
+            : ListSortDirection.Descending;
+        ManageableProcessesView.SortDescriptions.Add(new SortDescription(propertyName, direction));
+        ManageableProcessesView.Refresh();
     }
 
     [RelayCommand]
@@ -1924,4 +2146,12 @@ public partial class MainWindowViewModel : ObservableObject
         OnPropertyChanged(nameof(GameProcessProfiles));
     }
 
+    private sealed record MetricHistorySample(
+        DateTimeOffset CapturedAt,
+        double? CpuUsagePercent,
+        double? RamUsagePercent,
+        double? GpuUsagePercent,
+        double? CpuTemperatureC,
+        double? RamUsedGb,
+        double? TotalRamGb);
 }

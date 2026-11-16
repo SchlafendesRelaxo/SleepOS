@@ -5,6 +5,7 @@ using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
+using System.Windows.Shapes;
 using System.Windows.Threading;
 using Button = System.Windows.Controls.Button;
 using Brush = System.Windows.Media.Brush;
@@ -21,6 +22,8 @@ public partial class MainWindow : Window
     private readonly ObservableCollection<CommandCenterItem> _visibleCommands = new();
     private List<CommandCenterItem> _commandActions = new();
     private System.Windows.Forms.NotifyIcon? _trayIcon;
+    private Button? _activeNavigationButton;
+    private bool _sidebarCollapsed;
 
     public MainWindow()
     {
@@ -67,6 +70,45 @@ public partial class MainWindow : Window
     private void CloseWindow(object sender, RoutedEventArgs e)
     {
         Close();
+    }
+
+    private void ToggleSidebar_Click(object sender, RoutedEventArgs e)
+    {
+        _sidebarCollapsed = !_sidebarCollapsed;
+        SidebarColumn.Width = new GridLength(_sidebarCollapsed ? 76 : 244);
+        SidebarBrandText.Visibility = _sidebarCollapsed ? Visibility.Collapsed : Visibility.Visible;
+        SidebarWorkspaceHeading.Visibility = _sidebarCollapsed ? Visibility.Collapsed : Visibility.Visible;
+        SidebarAutomationHeading.Visibility = _sidebarCollapsed ? Visibility.Collapsed : Visibility.Visible;
+        SidebarToolsHeading.Visibility = _sidebarCollapsed ? Visibility.Collapsed : Visibility.Visible;
+        SidebarStatusText.Visibility = _sidebarCollapsed ? Visibility.Collapsed : Visibility.Visible;
+        SidebarStatusCard.Padding = _sidebarCollapsed ? new Thickness(0) : new Thickness(12);
+        SidebarToggleButton.Content = _sidebarCollapsed ? "\uE76B" : "\uE76C";
+        SidebarToggleButton.ToolTip = _sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar";
+
+        Button[] buttons =
+        [
+            DashboardNav, OptimizerNav, ProcessNav, ApplicationManagerNav, GamesNav, BenchmarkNav,
+            TweaksNav, AutoStartNav, SettingsNav, CareNav, HardwareNav, NetworkNav
+        ];
+        foreach (var button in buttons)
+        {
+            button.HorizontalContentAlignment = _sidebarCollapsed
+                ? System.Windows.HorizontalAlignment.Center
+                : System.Windows.HorizontalAlignment.Left;
+            button.Padding = _sidebarCollapsed ? new Thickness(0) : new Thickness(12, 8, 12, 8);
+            if (button.Content is StackPanel content && content.Children.Count > 1)
+            {
+                content.Children[1].Visibility = _sidebarCollapsed ? Visibility.Collapsed : Visibility.Visible;
+            }
+        }
+
+        if (SidebarStatusCard.Child is Grid statusGrid && statusGrid.Children.OfType<Ellipse>().FirstOrDefault() is { } indicator)
+        {
+            indicator.HorizontalAlignment = _sidebarCollapsed
+                ? System.Windows.HorizontalAlignment.Center
+                : System.Windows.HorizontalAlignment.Left;
+            indicator.Margin = _sidebarCollapsed ? new Thickness(0) : new Thickness(1, 3, 0, 0);
+        }
     }
 
     internal void ShowInTray()
@@ -220,12 +262,15 @@ public partial class MainWindow : Window
         _commandActions =
         [
             NavigationCommand("Open Dashboard", "Live CPU, GPU, RAM, drive, and network readings.", () => NavigateToPage(DashboardPage, DashboardNav)),
-            NavigationCommand("Open Optimizer", "Review the Balanced and High performance Windows power plans.", () => NavigateToPage(OptimizerPage, OptimizerNav)),
-            NavigationCommand("Open SleepOS tweaks", "Adjust SleepOS performance, refresh, motion, and appearance settings.", () => NavigateToPage(TweaksPage, TweaksNav)),
-            NavigationCommand("Open Games & processes", "View the games recognized by SleepOS.", () => NavigateToPage(GamesPage, GamesNav)),
+            NavigationCommand("Open Performance", "Choose SleepOS performance policies and review measured benchmarks.", () => NavigateToPage(OptimizerPage, OptimizerNav)),
+            NavigationCommand("Open Memory Saver", "Manage opt-in application memory and efficiency rules.", () => NavigateToSection(ProcessPage, ProcessNav, MemorySaverCard)),
+            NavigationCommand("Open Application Manager", "Review app processes, working sets, CPU, and safe actions.", () => NavigateToSection(ProcessPage, ApplicationManagerNav, ApplicationManagerCard)),
+            NavigationCommand("Open Gaming Optimizer", "Review recognized games and per-game profiles.", () => NavigateToPage(GamesPage, GamesNav)),
+            NavigationCommand("Open Benchmark", "Capture and compare measured system readings.", () => NavigateToSection(OptimizerPage, BenchmarkNav, BenchmarkCard)),
+            NavigationCommand("Open Automations", "Configure SleepOS performance automation.", () => NavigateToSection(TweaksPage, TweaksNav, AutomationOptionsCard)),
+            NavigationCommand("Open Autostart", "Configure Windows sign-in startup options.", () => NavigateToSection(SettingsPage, AutoStartNav, StartupSettingsCard)),
             NavigationCommand("Open Hardware center", "View real hardware details reported by Windows.", () => NavigateToPage(HardwarePage, HardwareNav)),
             NavigationCommand("Open Network analyzer", "Measure ping, jitter, packet loss, and inspect adapters.", () => NavigateToPage(NetworkPage, NetworkNav)),
-            NavigationCommand("Open Background apps", "Review process details and choose apps yourself.", () => NavigateToPage(ProcessPage, ProcessNav)),
             NavigationCommand("Open PC care", "Preview safe temporary-file cleanup and Windows maintenance settings.", () => NavigateToPage(CarePage, CareNav)),
             NavigationCommand("Open Settings", "Manage SleepOS preferences.", () => NavigateToPage(SettingsPage, SettingsNav)),
             ActionCommand("Refresh system readings", "Update the system metrics shown in SleepOS.", () =>
@@ -333,6 +378,123 @@ public partial class MainWindow : Window
         NavigateToPage(SettingsPage, SettingsNav);
     }
 
+    private void MemorySaver_Click(object sender, RoutedEventArgs e)
+    {
+        NavigateToSection(ProcessPage, ProcessNav, MemorySaverCard);
+    }
+
+    private void ApplicationManager_Click(object sender, RoutedEventArgs e)
+    {
+        NavigateToSection(ProcessPage, ApplicationManagerNav, ApplicationManagerCard);
+    }
+
+    private void GamingOptimizer_Click(object sender, RoutedEventArgs e)
+    {
+        NavigateToPage(GamesPage, GamesNav);
+    }
+
+    private void Benchmark_Click(object sender, RoutedEventArgs e)
+    {
+        NavigateToSection(OptimizerPage, BenchmarkNav, BenchmarkCard);
+    }
+
+    private void Automations_Click(object sender, RoutedEventArgs e)
+    {
+        NavigateToSection(TweaksPage, TweaksNav, AutomationOptionsCard);
+    }
+
+    private void AutoStart_Click(object sender, RoutedEventArgs e)
+    {
+        NavigateToSection(SettingsPage, AutoStartNav, StartupSettingsCard);
+    }
+
+    private void SettingsSearchBox_TextChanged(object sender, TextChangedEventArgs e)
+    {
+        if (SettingsContentPanel is null || SettingsSearchNoResults is null)
+        {
+            return;
+        }
+
+        var query = SettingsSearchBox.Text.Trim();
+        TextBlock? currentHeading = null;
+        var sectionHasMatch = false;
+        var anyMatch = false;
+        foreach (var child in SettingsContentPanel.Children)
+        {
+            if (child is TextBlock { Tag: "SettingsCategoryHeading" } heading)
+            {
+                if (currentHeading is not null)
+                {
+                    currentHeading.Visibility = sectionHasMatch ? Visibility.Visible : Visibility.Collapsed;
+                }
+
+                currentHeading = heading;
+                sectionHasMatch = false;
+                continue;
+            }
+
+            if (child is not Border card)
+            {
+                continue;
+            }
+
+            var searchableText = $"{currentHeading?.Text} {GetSearchableText(card)}";
+            var matches = query.Length == 0 || searchableText.Contains(query, StringComparison.OrdinalIgnoreCase);
+            card.Visibility = matches ? Visibility.Visible : Visibility.Collapsed;
+            if (matches)
+            {
+                sectionHasMatch = true;
+                anyMatch = true;
+            }
+        }
+
+        if (currentHeading is not null)
+        {
+            currentHeading.Visibility = sectionHasMatch ? Visibility.Visible : Visibility.Collapsed;
+        }
+
+        SettingsSearchNoResults.Visibility = query.Length > 0 && !anyMatch
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+    }
+
+    private static string GetSearchableText(DependencyObject element)
+    {
+        var values = new List<string>();
+        if (element is TextBlock textBlock)
+        {
+            values.Add(textBlock.Text);
+        }
+
+        if (element is ContentControl { Content: string content })
+        {
+            values.Add(content);
+        }
+
+        if (element is ItemsControl itemsControl)
+        {
+            values.AddRange(itemsControl.Items.Cast<object>().Select(item => item.ToString() ?? string.Empty));
+        }
+
+        foreach (var child in LogicalTreeHelper.GetChildren(element).OfType<DependencyObject>())
+        {
+            values.Add(GetSearchableText(child));
+        }
+
+        return string.Join(" ", values);
+    }
+
+    private void NavigateToSection(TabItem page, Button selectedNavigationButton, FrameworkElement section)
+    {
+        if (ReferenceEquals(page, SettingsPage))
+        {
+            SettingsSearchBox.Clear();
+        }
+
+        NavigateToPage(page, selectedNavigationButton);
+        Dispatcher.BeginInvoke(DispatcherPriority.Loaded, new Action(section.BringIntoView));
+    }
+
     private void NavigateToPage(TabItem page, Button selectedNavigationButton)
     {
         if (!ReferenceEquals(MainPages.SelectedItem, page))
@@ -341,12 +503,18 @@ public partial class MainWindow : Window
             AnimateSelectedPage();
         }
 
+        _activeNavigationButton = selectedNavigationButton;
         UpdateNavigationState(selectedNavigationButton);
     }
 
     private void UpdateNavigationState(Button selectedButton)
     {
-        Button[] buttons = [DashboardNav, OptimizerNav, TweaksNav, GamesNav, HardwareNav, NetworkNav, ProcessNav, CareNav, SettingsNav];
+        _activeNavigationButton = selectedButton;
+        Button[] buttons =
+        [
+            DashboardNav, OptimizerNav, ProcessNav, ApplicationManagerNav, GamesNav, BenchmarkNav,
+            TweaksNav, AutoStartNav, SettingsNav, CareNav, HardwareNav, NetworkNav
+        ];
         foreach (var button in buttons)
         {
             button.Background = Brushes.Transparent;
@@ -364,8 +532,8 @@ public partial class MainWindow : Window
             }
         }
 
-        selectedButton.Background = new SolidColorBrush(Color.FromRgb(37, 31, 51));
-        selectedButton.BorderBrush = new SolidColorBrush(Color.FromRgb(74, 54, 100));
+        selectedButton.Background = (Brush)FindResource("NavSelectedBrush");
+        selectedButton.BorderBrush = (Brush)FindResource("NavSelectedBorderBrush");
         selectedButton.Foreground = (Brush)FindResource("TextBrush");
     }
 
@@ -677,6 +845,7 @@ public partial class MainWindow : Window
                 ["CommandItemSelectedBrush"] = Color.FromRgb(223, 229, 244),
                 ["CommandHintBrush"] = Color.FromRgb(71, 96, 158),
                 ["ReviewBrush"] = Color.FromRgb(143, 101, 0),
+                ["SuccessBrush"] = Color.FromRgb(22, 163, 74),
                 ["DangerBrush"] = Color.FromRgb(252, 232, 238),
                 ["DangerBorderBrush"] = Color.FromRgb(231, 187, 200),
                 ["DangerTextBrush"] = Color.FromRgb(122, 32, 54),
@@ -689,39 +858,40 @@ public partial class MainWindow : Window
             }
             : new Dictionary<string, Color>
             {
-                ["BackgroundBrush"] = Color.FromRgb(9, 9, 13),
-                ["PanelBrush"] = Color.FromRgb(17, 17, 25),
-                ["CardBrush"] = Color.FromRgb(21, 21, 31),
-                ["LineBrush"] = Color.FromRgb(40, 40, 53),
+                ["BackgroundBrush"] = Color.FromRgb(8, 8, 17),
+                ["PanelBrush"] = Color.FromRgb(14, 14, 24),
+                ["CardBrush"] = Color.FromRgb(17, 17, 31),
+                ["LineBrush"] = Color.FromRgb(39, 36, 57),
                 ["TextBrush"] = Color.FromRgb(244, 244, 248),
-                ["MutedBrush"] = Color.FromRgb(150, 150, 165),
-                ["TopBarBrush"] = Color.FromRgb(16, 16, 23),
-                ["SidebarBrush"] = Color.FromRgb(14, 14, 20),
-                ["ControlBrush"] = Color.FromRgb(27, 27, 39),
-                ["ControlBorderBrush"] = Color.FromRgb(52, 52, 68),
-                ["HoverBrush"] = Color.FromRgb(41, 38, 58),
-                ["PressedBrush"] = Color.FromRgb(57, 36, 79),
-                ["ListBrush"] = Color.FromRgb(16, 16, 24),
-                ["HeroBorderBrush"] = Color.FromRgb(61, 78, 120),
-                ["HeroSubtitleBrush"] = Color.FromRgb(182, 180, 196),
+                ["MutedBrush"] = Color.FromRgb(157, 153, 177),
+                ["TopBarBrush"] = Color.FromRgb(12, 12, 22),
+                ["SidebarBrush"] = Color.FromRgb(10, 10, 19),
+                ["ControlBrush"] = Color.FromRgb(25, 24, 39),
+                ["ControlBorderBrush"] = Color.FromRgb(57, 51, 78),
+                ["HoverBrush"] = Color.FromRgb(39, 31, 57),
+                ["PressedBrush"] = Color.FromRgb(56, 32, 84),
+                ["ListBrush"] = Color.FromRgb(12, 12, 22),
+                ["HeroBorderBrush"] = Color.FromRgb(86, 54, 133),
+                ["HeroSubtitleBrush"] = Color.FromRgb(194, 187, 211),
                 ["OverlayBrush"] = Color.FromArgb(181, 9, 12, 21),
-                ["CommandSurfaceBrush"] = Color.FromRgb(17, 19, 29),
-                ["CommandBorderBrush"] = Color.FromRgb(83, 109, 154),
-                ["CommandSearchBorderBrush"] = Color.FromRgb(57, 73, 109),
-                ["CommandItemBrush"] = Color.FromRgb(21, 25, 37),
-                ["CommandItemHoverBrush"] = Color.FromRgb(32, 42, 66),
-                ["CommandItemSelectedBrush"] = Color.FromRgb(27, 33, 49),
-                ["CommandHintBrush"] = Color.FromRgb(145, 180, 255),
+                ["CommandSurfaceBrush"] = Color.FromRgb(17, 17, 31),
+                ["CommandBorderBrush"] = Color.FromRgb(90, 60, 137),
+                ["CommandSearchBorderBrush"] = Color.FromRgb(64, 49, 96),
+                ["CommandItemBrush"] = Color.FromRgb(22, 21, 37),
+                ["CommandItemHoverBrush"] = Color.FromRgb(39, 31, 57),
+                ["CommandItemSelectedBrush"] = Color.FromRgb(31, 25, 46),
+                ["CommandHintBrush"] = Color.FromRgb(182, 106, 255),
                 ["ReviewBrush"] = Color.FromRgb(251, 191, 36),
+                ["SuccessBrush"] = Color.FromRgb(34, 197, 94),
                 ["DangerBrush"] = Color.FromRgb(53, 27, 42),
                 ["DangerBorderBrush"] = Color.FromRgb(116, 51, 77),
                 ["DangerTextBrush"] = Color.FromRgb(255, 209, 220),
-                ["DashboardTagBrush"] = Color.FromRgb(36, 53, 82),
-                ["DashboardTagBorderBrush"] = Color.FromRgb(66, 93, 135),
-                ["DashboardMetaBrush"] = Color.FromRgb(23, 28, 42),
-                ["DashboardMetaBorderBrush"] = Color.FromRgb(48, 58, 85),
-                ["OrbitBrush"] = Color.FromRgb(70, 91, 145),
-                ["OrbitAccentBrush"] = Color.FromRgb(117, 85, 169)
+                ["DashboardTagBrush"] = Color.FromRgb(37, 25, 56),
+                ["DashboardTagBorderBrush"] = Color.FromRgb(91, 57, 135),
+                ["DashboardMetaBrush"] = Color.FromRgb(23, 21, 37),
+                ["DashboardMetaBorderBrush"] = Color.FromRgb(55, 45, 80),
+                ["OrbitBrush"] = Color.FromRgb(97, 63, 143),
+                ["OrbitAccentBrush"] = Color.FromRgb(153, 82, 219)
             };
 
         foreach (var (key, color) in themeBrushes)
@@ -757,17 +927,17 @@ public partial class MainWindow : Window
                 NavBackground: Color.FromRgb(23, 48, 43),
                 NavBorder: Color.FromRgb(45, 102, 87)),
             _ => (
-                Accent: Color.FromRgb(168, 85, 247),
-                AccentBlue: Color.FromRgb(121, 168, 255),
-                NavBackground: Color.FromRgb(37, 31, 51),
-                NavBorder: Color.FromRgb(74, 54, 100))
+                Accent: Color.FromRgb(139, 53, 255),
+                AccentBlue: Color.FromRgb(182, 106, 255),
+                NavBackground: Color.FromRgb(37, 25, 56),
+                NavBorder: Color.FromRgb(91, 57, 135))
         };
 
         Resources["AccentColor"] = accentPalette.Accent;
         Resources["AccentBlueColor"] = accentPalette.AccentBlue;
-        Resources["HeroStartColor"] = light ? Color.FromRgb(234, 240, 255) : Color.FromRgb(28, 42, 74);
-        Resources["HeroMiddleColor"] = light ? Color.FromRgb(244, 237, 255) : Color.FromRgb(33, 27, 59);
-        Resources["HeroEndColor"] = light ? Color.FromRgb(249, 250, 253) : Color.FromRgb(18, 24, 33);
+        Resources["HeroStartColor"] = light ? Color.FromRgb(234, 240, 255) : Color.FromRgb(39, 22, 62);
+        Resources["HeroMiddleColor"] = light ? Color.FromRgb(244, 237, 255) : Color.FromRgb(30, 21, 47);
+        Resources["HeroEndColor"] = light ? Color.FromRgb(249, 250, 253) : Color.FromRgb(17, 17, 31);
         Resources["AccentBrush"] = new SolidColorBrush(accentPalette.Accent);
         Resources["AccentBlueBrush"] = new SolidColorBrush(accentPalette.AccentBlue);
         Resources["NavSelectedBrush"] = new SolidColorBrush(accentPalette.NavBackground);
@@ -782,6 +952,11 @@ public partial class MainWindow : Window
 
     private Button? GetSelectedNavigationButton()
     {
+        if (_activeNavigationButton is not null)
+        {
+            return _activeNavigationButton;
+        }
+
         if (ReferenceEquals(MainPages.SelectedItem, DashboardPage)) return DashboardNav;
         if (ReferenceEquals(MainPages.SelectedItem, OptimizerPage)) return OptimizerNav;
         if (ReferenceEquals(MainPages.SelectedItem, TweaksPage)) return TweaksNav;
