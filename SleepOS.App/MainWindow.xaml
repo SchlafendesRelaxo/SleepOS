@@ -1156,7 +1156,7 @@
                                         </Grid>
                                         <TextBlock Text="{Binding MemorySaverStatus}" Foreground="{DynamicResource MutedBrush}"
                                                    Margin="0,6,0,0" TextWrapping="Wrap"/>
-                                        <TextBlock Text="EcoQoS changes CPU/power scheduling, not RAM allocation. A working-set trim below can free resident pages temporarily; Windows or the app may bring them back."
+                                        <TextBlock Text="EcoQoS changes CPU/power scheduling, not RAM allocation. When automatic Memory Saver is on, opted-in apps can receive a working-set trim after their idle delay and memory threshold. Apps may reload those pages."
                                                    Foreground="{DynamicResource MutedBrush}" FontSize="11" TextWrapping="Wrap" Margin="0,5,0,0"/>
                                         <StackPanel Orientation="Horizontal" Margin="0,12,0,12">
                                             <Button Content="Add selected apps" Style="{StaticResource ActionButton}"
@@ -1182,6 +1182,9 @@
                                                                 <TextBlock Text="{Binding ExecutablePath}" Foreground="{DynamicResource MutedBrush}"
                                                                            FontSize="10" TextTrimming="CharacterEllipsis" ToolTip="{Binding ExecutablePath}"
                                                                            Margin="22,3,8,0"/>
+                                                                <CheckBox Content="Trim working set at high memory use (30-minute cooldown)"
+                                                                          IsChecked="{Binding TrimWorkingSetOnHighMemory, Mode=TwoWay}"
+                                                                          Style="{StaticResource ProcessCheckBox}" FontSize="10" Margin="22,5,0,0"/>
                                                             </StackPanel>
                                                             <TextBlock Grid.Column="1" Text="Idle after" Foreground="{DynamicResource MutedBrush}"
                                                                        VerticalAlignment="Center" Margin="8,0"/>

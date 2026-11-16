@@ -27,6 +27,7 @@ public sealed class ApplicationPerformanceRule
     public string ProcessName { get; set; } = string.Empty;
     public int InactivityMinutes { get; set; } = 10;
     public bool Enabled { get; set; } = true;
+    public bool TrimWorkingSetOnHighMemory { get; set; } = true;
 }
 
 public sealed class PerformanceBenchmarkRecord

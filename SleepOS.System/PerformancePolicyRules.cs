@@ -54,4 +54,30 @@ public static class PerformancePolicyRules
             cpuLoad >= cpuThreshold;
         return highMemory || highCpu;
     }
+
+    public static bool ShouldTrimWorkingSet(
+        PerformanceModePolicy policy,
+        bool automaticMemorySaverEnabled,
+        bool appOptedIn,
+        bool isGame,
+        bool hasVisibleWindow,
+        bool isForeground,
+        double? memoryLoadPercent,
+        TimeSpan inactiveFor,
+        int inactivityThresholdMinutes,
+        DateTime? lastTrimUtc,
+        DateTime nowUtc,
+        TimeSpan cooldown)
+    {
+        if (!automaticMemorySaverEnabled || !appOptedIn || isGame || !hasVisibleWindow || isForeground ||
+            policy.AutomaticMemoryThresholdPercent is not { } memoryThreshold ||
+            memoryLoadPercent is not { } memoryLoad ||
+            memoryLoad < memoryThreshold ||
+            inactiveFor < TimeSpan.FromMinutes(Math.Clamp(inactivityThresholdMinutes, 1, 120)))
+        {
+            return false;
+        }
+
+        return lastTrimUtc is null || nowUtc - lastTrimUtc.Value >= cooldown;
+    }
 }

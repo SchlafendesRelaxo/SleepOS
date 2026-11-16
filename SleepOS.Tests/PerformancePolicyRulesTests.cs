@@ -78,4 +78,45 @@ public sealed class PerformancePolicyRulesTests
         Assert.True(PerformancePolicyRules.ShouldEnableEfficiencyMode(
             batterySaver, true, false, false, true, false, 50, TimeSpan.FromMinutes(10), 10, cpuLoadPercent: 85));
     }
+
+    [Fact]
+    public void WorkingSetTrimRequiresOptInHighMemoryAnIdleAppAndExpiredCooldown()
+    {
+        var policy = PerformancePolicyRules.GetMode("Balanced");
+        var now = DateTime.UtcNow;
+
+        Assert.True(Evaluate());
+        Assert.False(Evaluate(automaticMemorySaverEnabled: false));
+        Assert.False(Evaluate(appOptedIn: false));
+        Assert.False(Evaluate(isGame: true));
+        Assert.False(Evaluate(hasVisibleWindow: false));
+        Assert.False(Evaluate(isForeground: true));
+        Assert.False(Evaluate(memoryLoadPercent: 84.9));
+        Assert.False(Evaluate(inactiveFor: TimeSpan.FromMinutes(4)));
+        Assert.False(Evaluate(lastTrimUtc: now.AddMinutes(-29)));
+        Assert.True(Evaluate(lastTrimUtc: now.AddMinutes(-30)));
+
+        bool Evaluate(
+            bool automaticMemorySaverEnabled = true,
+            bool appOptedIn = true,
+            bool isGame = false,
+            bool hasVisibleWindow = true,
+            bool isForeground = false,
+            double? memoryLoadPercent = 85,
+            TimeSpan? inactiveFor = null,
+            DateTime? lastTrimUtc = null) =>
+            PerformancePolicyRules.ShouldTrimWorkingSet(
+                policy,
+                automaticMemorySaverEnabled,
+                appOptedIn,
+                isGame,
+                hasVisibleWindow,
+                isForeground,
+                memoryLoadPercent,
+                inactiveFor ?? TimeSpan.FromMinutes(10),
+                inactivityThresholdMinutes: 10,
+                lastTrimUtc,
+                now,
+                cooldown: TimeSpan.FromMinutes(30));
+    }
 }

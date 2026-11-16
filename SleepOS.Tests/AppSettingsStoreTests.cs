@@ -116,7 +116,8 @@ public sealed class AppSettingsStoreTests
                         ExecutablePath = @"C:\Games\Example\game.exe",
                         ProcessName = "game",
                         InactivityMinutes = 20,
-                        Enabled = true
+                        Enabled = true,
+                        TrimWorkingSetOnHighMemory = false
                     }
                 ],
                 GameProfiles =
@@ -153,6 +154,7 @@ public sealed class AppSettingsStoreTests
             Assert.True(settings.AutomaticMemorySaverEnabled);
             Assert.True(settings.AutomaticGamingModeEnabled);
             Assert.Equal(20, Assert.Single(settings.ManagedApplications).InactivityMinutes);
+            Assert.False(Assert.Single(settings.ManagedApplications).TrimWorkingSetOnHighMemory);
             Assert.Equal("Extreme Performance", Assert.Single(settings.GameProfiles).PerformanceMode);
             Assert.Equal(42, Assert.Single(settings.BenchmarkHistory).BackgroundProcessCount);
             Assert.Equal(2, Assert.Single(settings.BenchmarkHistory).UninspectedProcessCount);

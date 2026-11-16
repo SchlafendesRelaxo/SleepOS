@@ -41,6 +41,8 @@ public partial class MainWindowViewModel : ObservableObject
     private int _automationInProgress;
     private bool _isClosing;
     private readonly ConcurrentDictionary<(int ProcessId, long StartTimeTicks), ManagedProcessCandidate> _automaticEfficiencyProcesses = new();
+    private readonly ConcurrentDictionary<(int ProcessId, long StartTimeTicks), DateTime> _automaticWorkingSetTrimmedAtUtc = new();
+    private static readonly TimeSpan AutomaticWorkingSetTrimCooldown = TimeSpan.FromMinutes(30);
     private bool _startMinimized;
     private int _startupDelaySeconds;
 
@@ -116,7 +118,7 @@ public partial class MainWindowViewModel : ObservableObject
     public bool CanRemoveDuplicateShortcuts => DuplicateDesktopShortcuts.Any(shortcut => shortcut.IsSelected);
     public bool CanCleanTemporaryFiles { get; private set; }
     public string ProcessManagementStatus { get; private set; } = "Scan to find running non-Windows apps.";
-    public string MemorySaverStatus { get; private set; } = "Memory Saver is opt-in and only applies Windows efficiency mode to apps you manage.";
+    public string MemorySaverStatus { get; private set; } = "Memory Saver is opt-in. Managed apps can use EcoQoS and an optional temporary working-set trim at high memory pressure.";
     public string StartupStatus { get; private set; } = "Checking current-user sign-in startup...";
     public string BenchmarkStatus { get; private set; } = "Capture a baseline, make a change, then capture another reading to compare measured values.";
     public string GameProfileStatus { get; private set; } = "Add a running app from Background apps to recognize it as a game.";
@@ -1055,7 +1057,8 @@ public partial class MainWindowViewModel : ObservableObject
                 ExecutablePath = process.ExecutablePath,
                 ProcessName = process.Name,
                 InactivityMinutes = 10,
-                Enabled = true
+                Enabled = true,
+                TrimWorkingSetOnHighMemory = true
             });
             process.IsMemorySaverManaged = true;
         }
@@ -1229,7 +1232,8 @@ public partial class MainWindowViewModel : ObservableObject
                 ExecutablePath = Path.GetFullPath(rule.ExecutablePath),
                 ProcessName = rule.ProcessName,
                 InactivityMinutes = MemorySaverInactivityOptions.Contains(rule.InactivityMinutes) ? rule.InactivityMinutes : 10,
-                Enabled = rule.Enabled
+                Enabled = rule.Enabled,
+                TrimWorkingSetOnHighMemory = rule.TrimWorkingSetOnHighMemory
             })
             .DistinctBy(rule => rule.ExecutablePath, StringComparer.OrdinalIgnoreCase)
             .ToList();
@@ -1244,7 +1248,9 @@ public partial class MainWindowViewModel : ObservableObject
                 rule.Enabled && string.Equals(rule.ExecutablePath, process.ExecutablePath, StringComparison.OrdinalIgnoreCase));
         }
 
-        MemorySaverStatus = $"{settings.ManagedApplications.Count(rule => rule.Enabled):N0} app rule(s) saved. Only selected, eligible apps can be changed.";
+        var trimRuleCount = settings.ManagedApplications.Count(rule => rule.Enabled && rule.TrimWorkingSetOnHighMemory);
+        MemorySaverStatus =
+            $"{settings.ManagedApplications.Count(rule => rule.Enabled):N0} app rule(s) saved; {trimRuleCount:N0} opted into temporary high-memory trims.";
         OnPropertyChanged(nameof(ManagedApplications));
         OnPropertyChanged(nameof(MemorySaverStatus));
     }
@@ -1260,9 +1266,14 @@ public partial class MainWindowViewModel : ObservableObject
         }
 
         AutomaticMemorySaverEnabled = settings.AutomaticMemorySaverEnabled;
+        if (!AutomaticMemorySaverEnabled)
+        {
+            _automaticWorkingSetTrimmedAtUtc.Clear();
+        }
+
         MemorySaverStatus = AutomaticMemorySaverEnabled
-            ? "Automatic Memory Saver is on. It only uses EcoQoS for opted-in, visible apps after their idle threshold and at high CPU or memory load."
-            : "Automatic Memory Saver is off. Existing SleepOS-applied efficiency settings will be restored on the next evaluation.";
+            ? "Automatic Memory Saver is on. EcoQoS follows each app's idle/load rules; selected working sets may be trimmed at high memory pressure, no more than once every 30 minutes per process."
+            : "Automatic Memory Saver is off. SleepOS-applied efficiency settings will be restored on the next evaluation; automatic working-set trimming is disabled.";
         OnPropertyChanged(nameof(AutomaticMemorySaverEnabled));
         OnPropertyChanged(nameof(MemorySaverStatus));
     }
@@ -1633,6 +1644,7 @@ public partial class MainWindowViewModel : ObservableObject
                 var memoryLoad = metrics.RamUsedGb is { } used && metrics.TotalRamGb is { } total && total > 0
                     ? used / total * 100d
                     : (double?)null;
+                var trimCandidates = new List<ManagedProcessCandidate>();
                 var seen = new HashSet<(int ProcessId, long StartTimeTicks)>();
 
                 foreach (var process in scan.Processes)
@@ -1673,11 +1685,59 @@ public partial class MainWindowViewModel : ObservableObject
                     {
                         _processManagementService.SetEfficiencyMode([process], enabled: false);
                     }
+
+                    var lastTrimUtc = _automaticWorkingSetTrimmedAtUtc.TryGetValue(key, out var previousTrimUtc)
+                        ? previousTrimUtc
+                        : (DateTime?)null;
+                    if (rule is not null && PerformancePolicyRules.ShouldTrimWorkingSet(
+                            policy,
+                            automaticMemorySaverEnabled: settings.AutomaticMemorySaverEnabled,
+                            appOptedIn: rule.TrimWorkingSetOnHighMemory,
+                            isGame: games.Contains(process.Name),
+                            hasVisibleWindow: process.HasVisibleWindow,
+                            isForeground: process.IsForeground,
+                            memoryLoadPercent: memoryLoad,
+                            inactiveFor: process.InactiveFor,
+                            inactivityThresholdMinutes: rule.InactivityMinutes,
+                            lastTrimUtc: lastTrimUtc,
+                            nowUtc: DateTime.UtcNow,
+                            cooldown: AutomaticWorkingSetTrimCooldown))
+                    {
+                        trimCandidates.Add(process);
+                    }
+                }
+
+                if (!_isClosing && trimCandidates.Count > 0)
+                {
+                    var trimResult = _processManagementService.TrimWorkingSets(trimCandidates);
+                    var trimmedAtUtc = DateTime.UtcNow;
+                    foreach (var process in trimCandidates)
+                    {
+                        _automaticWorkingSetTrimmedAtUtc[(process.ProcessId, process.StartTimeUtcTicks)] = trimmedAtUtc;
+                    }
+
+                    var trimMessage =
+                        $"Automatic RAM trim: requested for {trimResult.TrimmedCount:N0} idle app process(es); measured reduction {trimResult.ObservedReductionMb:F1} MB. Apps may allocate it again.";
+                    if (trimResult.Failures.Count > 0)
+                    {
+                        trimMessage += $" {trimResult.Failures.Count:N0} could not be trimmed: {string.Join(" ", trimResult.Failures.Take(2))}";
+                    }
+
+                    System.Windows.Application.Current?.Dispatcher.BeginInvoke(() =>
+                    {
+                        MemorySaverStatus = trimMessage;
+                        OnPropertyChanged(nameof(MemorySaverStatus));
+                    });
                 }
 
                 foreach (var key in _automaticEfficiencyProcesses.Keys.Where(key => !seen.Contains(key)).ToArray())
                 {
                     _automaticEfficiencyProcesses.TryRemove(key, out _);
+                }
+
+                foreach (var key in _automaticWorkingSetTrimmedAtUtc.Keys.Where(key => !seen.Contains(key)).ToArray())
+                {
+                    _automaticWorkingSetTrimmedAtUtc.TryRemove(key, out _);
                 }
             }
             catch (Exception exception) when (exception is InvalidOperationException or UnauthorizedAccessException or IOException or System.ComponentModel.Win32Exception)
