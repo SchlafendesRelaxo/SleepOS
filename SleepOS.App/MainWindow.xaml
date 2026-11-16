@@ -1115,7 +1115,7 @@
                                         </Grid.ColumnDefinitions>
                                         <StackPanel VerticalAlignment="Center">
                                             <TextBlock Text="Automatic Memory Saver" Foreground="{DynamicResource TextBrush}" FontWeight="SemiBold"/>
-                                            <TextBlock Text="Uses EcoQoS only for explicitly managed, visible apps after their own inactivity delay and when the selected profile's CPU or memory threshold is reached."
+                                            <TextBlock Text="After the app's idle delay, lower its Windows memory priority. Windows can reclaim those pages first when needed; high-memory pressure can also trigger a working-set trim."
                                                        Foreground="{DynamicResource MutedBrush}" FontSize="11" TextWrapping="Wrap" Margin="0,4,12,0"/>
                                         </StackPanel>
                                         <Button Grid.Column="1" Content="{Binding AutomaticMemorySaverEnabled, StringFormat=Toggle (currently {0})}"
@@ -1329,8 +1329,23 @@
                                         </Grid>
                                         <TextBlock Text="{Binding MemorySaverStatus}" Foreground="{DynamicResource MutedBrush}"
                                                    Margin="0,6,0,0" TextWrapping="Wrap"/>
-                                        <TextBlock Text="EcoQoS changes CPU/power scheduling, not RAM allocation. When automatic Memory Saver is on, opted-in apps can receive a working-set trim after their idle delay and memory threshold. Apps may reload those pages."
+                                        <TextBlock Text="After an opted-in app's idle delay, SleepOS asks Windows to keep its memory priority low; Windows then prefers reclaiming those pages when memory is needed. This is not a memory cap. A working-set trim is an additional temporary request at high memory use."
                                                    Foreground="{DynamicResource MutedBrush}" FontSize="11" TextWrapping="Wrap" Margin="0,5,0,0"/>
+                                        <Grid Margin="0,12,0,0">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="Auto"/>
+                                                <ColumnDefinition Width="150"/>
+                                                <ColumnDefinition Width="*"/>
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock Text="Memory Saver level" Foreground="{DynamicResource TextBrush}"
+                                                       VerticalAlignment="Center" FontWeight="SemiBold" Margin="0,0,10,0"/>
+                                            <ComboBox Grid.Column="1" Style="{StaticResource SleepOSComboBox}"
+                                                      ItemsSource="{Binding MemorySaverLevelOptions}"
+                                                      SelectedItem="{Binding MemorySaverLevel, Mode=TwoWay}"/>
+                                            <TextBlock Grid.Column="2" Text="{Binding MemorySaverLevelDescription}"
+                                                       Foreground="{DynamicResource MutedBrush}" FontSize="10"
+                                                       VerticalAlignment="Center" TextWrapping="Wrap" Margin="12,0,0,0"/>
+                                        </Grid>
                                         <StackPanel Orientation="Horizontal" Margin="0,12,0,12">
                                             <Button Content="Add selected apps" Style="{StaticResource ActionButton}"
                                                     Command="{Binding AddSelectedToMemorySaverCommand}" Margin="0,0,8,0"/>
@@ -1355,7 +1370,7 @@
                                                                 <TextBlock Text="{Binding ExecutablePath}" Foreground="{DynamicResource MutedBrush}"
                                                                            FontSize="10" TextTrimming="CharacterEllipsis" ToolTip="{Binding ExecutablePath}"
                                                                            Margin="22,3,8,0"/>
-                                                                <CheckBox Content="Trim working set at high memory use (30-minute cooldown)"
+                                                                <CheckBox Content="Use low page priority and periodic trim under high memory"
                                                                           IsChecked="{Binding TrimWorkingSetOnHighMemory, Mode=TwoWay}"
                                                                           Style="{StaticResource ProcessCheckBox}" FontSize="10" Margin="22,5,0,0"/>
                                                             </StackPanel>
@@ -1513,7 +1528,7 @@
                                                 BorderThickness="1" CornerRadius="12" Padding="14" Margin="0,14,0,0">
                                             <StackPanel>
                                                 <TextBlock Text="Selected app actions" Style="{StaticResource SectionTitle}" FontSize="14"/>
-                                                <TextBlock Text="Tick app checkboxes above. EcoQoS and priority affect CPU scheduling; working-set trim is temporary."
+                                                <TextBlock Text="Tick app checkboxes above. Automatic Memory Saver can lower page priority while an app is idle under pressure; a manual working-set trim is temporary."
                                                            Foreground="{DynamicResource MutedBrush}" FontSize="11"
                                                            TextWrapping="Wrap" Margin="0,5,0,0"/>
                                                 <TextBlock Text="{Binding ProcessManagementStatus}" Foreground="{DynamicResource AccentBrush}"

@@ -10,6 +10,17 @@ public sealed record PerformanceModePolicy(
 
 public static class PerformancePolicyRules
 {
+    public static int GetMemorySaverInactivityMinutes(string? level, int configuredMinutes)
+    {
+        var minutes = Math.Clamp(configuredMinutes, 1, 120);
+        return level?.Trim().ToLowerInvariant() switch
+        {
+            "moderate" => Math.Min(120, minutes * 2),
+            "maximum" => Math.Max(1, (minutes + 1) / 2),
+            _ => minutes
+        };
+    }
+
     public static PerformanceModePolicy GetMode(string? mode) => mode?.Trim().ToLowerInvariant() switch
     {
         "gaming" or "game focus" => new PerformanceModePolicy("Gaming", 10, false, 85, true, null),
@@ -67,17 +78,37 @@ public static class PerformancePolicyRules
         int inactivityThresholdMinutes,
         DateTime? lastTrimUtc,
         DateTime nowUtc,
-        TimeSpan cooldown)
+        TimeSpan cooldown,
+        string memorySaverLevel = "Balanced")
     {
         if (!automaticMemorySaverEnabled || !appOptedIn || isGame || !hasVisibleWindow || isForeground ||
             policy.AutomaticMemoryThresholdPercent is not { } memoryThreshold ||
             memoryLoadPercent is not { } memoryLoad ||
             memoryLoad < memoryThreshold ||
-            inactiveFor < TimeSpan.FromMinutes(Math.Clamp(inactivityThresholdMinutes, 1, 120)))
+            inactiveFor < TimeSpan.FromMinutes(GetMemorySaverInactivityMinutes(memorySaverLevel, inactivityThresholdMinutes)))
         {
             return false;
         }
 
         return lastTrimUtc is null || nowUtc - lastTrimUtc.Value >= cooldown;
+    }
+
+    public static bool ShouldLowerMemoryPriority(
+        bool automaticMemorySaverEnabled,
+        bool appOptedIn,
+        bool isGame,
+        bool hasVisibleWindow,
+        bool isForeground,
+        TimeSpan inactiveFor,
+        int inactivityThresholdMinutes,
+        string memorySaverLevel = "Balanced")
+    {
+        if (!automaticMemorySaverEnabled || !appOptedIn || isGame || !hasVisibleWindow || isForeground ||
+            inactiveFor < TimeSpan.FromMinutes(GetMemorySaverInactivityMinutes(memorySaverLevel, inactivityThresholdMinutes)))
+        {
+            return false;
+        }
+
+        return true;
     }
 }

@@ -38,12 +38,14 @@ public partial class MainWindowViewModel : ObservableObject
     private string _performanceMode = "Balanced";
     private string _accentTheme = "Violet";
     private string _colorMode = "Dark";
+    private string _memorySaverLevel = "Balanced";
     private int _metricsRefreshSeconds = 5;
     private bool _pageAnimationsEnabled = true;
     private DateTime _lastAutomationRunUtc = DateTime.MinValue;
     private int _automationInProgress;
     private bool _isClosing;
     private readonly ConcurrentDictionary<(int ProcessId, long StartTimeTicks), ManagedProcessCandidate> _automaticEfficiencyProcesses = new();
+    private readonly ConcurrentDictionary<(int ProcessId, long StartTimeTicks), ManagedProcessCandidate> _automaticMemoryPriorityProcesses = new();
     private readonly ConcurrentDictionary<(int ProcessId, long StartTimeTicks), DateTime> _automaticWorkingSetTrimmedAtUtc = new();
     private static readonly TimeSpan AutomaticWorkingSetTrimCooldown = TimeSpan.FromMinutes(30);
     private readonly Queue<MetricHistorySample> _metricHistory = new();
@@ -111,6 +113,7 @@ public partial class MainWindowViewModel : ObservableObject
     public IReadOnlyList<string> PerformanceModeOptions { get; } = ["Balanced", "Gaming", "Extreme Performance", "Battery Saver", "Custom"];
     public IReadOnlyList<int> MetricsRefreshOptions { get; } = [5, 10, 30];
     public IReadOnlyList<int> MemorySaverInactivityOptions { get; } = [1, 5, 10, 20, 30, 60];
+    public IReadOnlyList<string> MemorySaverLevelOptions { get; } = ["Moderate", "Balanced", "Maximum"];
     public IReadOnlyList<int> StartupDelayOptions { get; } = [0, 5, 10, 30, 60, 120, 300];
     public IReadOnlyList<string> GamePerformanceModeOptions { get; } = ["Balanced", "Gaming", "Extreme Performance", "Battery Saver"];
     public IReadOnlyList<string> ProcessSortOptions { get; } = ["Memory", "CPU", "Name"];
@@ -183,7 +186,7 @@ public partial class MainWindowViewModel : ObservableObject
     public bool CanRemoveDuplicateShortcuts => DuplicateDesktopShortcuts.Any(shortcut => shortcut.IsSelected);
     public bool CanCleanTemporaryFiles { get; private set; }
     public string ProcessManagementStatus { get; private set; } = "Scan to find running non-Windows apps.";
-    public string MemorySaverStatus { get; private set; } = "Memory Saver is opt-in. Managed apps can use EcoQoS and an optional temporary working-set trim at high memory pressure.";
+    public string MemorySaverStatus { get; private set; } = "Memory Saver is opt-in. After an app's idle delay, Windows can prefer reclaiming its pages when needed; working-set trims are temporary.";
     public string StartupStatus { get; private set; } = "Checking current-user sign-in startup...";
     public string BenchmarkStatus { get; private set; } = "Capture a baseline, make a change, then capture another reading to compare measured values.";
     public string GameProfileStatus { get; private set; } = "Add a running app from Background apps to recognize it as a game.";
@@ -213,10 +216,41 @@ public partial class MainWindowViewModel : ObservableObject
         }
     }
     public bool AutomaticMemorySaverEnabled { get; private set; }
+    public string MemorySaverLevel
+    {
+        get => _memorySaverLevel;
+        set
+        {
+            var normalized = NormalizeMemorySaverLevel(value);
+            if (string.Equals(_memorySaverLevel, normalized, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            var settings = _settingsStore.Load();
+            settings.MemorySaverLevel = normalized;
+            if (!SaveSettings(settings))
+            {
+                OnPropertyChanged();
+                return;
+            }
+
+            _memorySaverLevel = normalized;
+            _lastAutomationRunUtc = DateTime.MinValue;
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(MemorySaverLevelDescription));
+        }
+    }
+    public string MemorySaverLevelDescription => MemorySaverLevel switch
+    {
+        "Moderate" => "Waits longer before applying memory-saving policies.",
+        "Maximum" => "Applies memory-saving policies sooner after the selected app's idle delay.",
+        _ => "Uses each app's configured idle delay."
+    };
     public bool AutomaticGamingModeEnabled { get; private set; }
     public bool AutomaticHighCpuAnalysisEnabled { get; private set; }
     public bool HasPerformanceAutomation => AutomaticMemorySaverEnabled || AutomaticGamingModeEnabled ||
-        AutomaticHighCpuAnalysisEnabled || _automaticEfficiencyProcesses.Count > 0;
+        AutomaticHighCpuAnalysisEnabled || _automaticEfficiencyProcesses.Count > 0 || _automaticMemoryPriorityProcesses.Count > 0;
     public bool IsStartupDelayEnabled => AutoStartEnabled;
     public string HardwareInventoryStatus { get; private set; } = "Scan to read hardware details reported by Windows.";
     public string NetworkAdapterStatus { get; private set; } = "Scan to read network adapters reported by Windows.";
@@ -1472,7 +1506,7 @@ public partial class MainWindowViewModel : ObservableObject
 
         var trimRuleCount = settings.ManagedApplications.Count(rule => rule.Enabled && rule.TrimWorkingSetOnHighMemory);
         MemorySaverStatus =
-            $"{settings.ManagedApplications.Count(rule => rule.Enabled):N0} app rule(s) saved; {trimRuleCount:N0} opted into temporary high-memory trims.";
+        $"{settings.ManagedApplications.Count(rule => rule.Enabled):N0} app rule(s) saved; {trimRuleCount:N0} opted into low-priority page handling and optional high-memory trims.";
         OnPropertyChanged(nameof(ManagedApplications));
         OnPropertyChanged(nameof(MemorySaverStatus));
     }
@@ -1494,8 +1528,8 @@ public partial class MainWindowViewModel : ObservableObject
         }
 
         MemorySaverStatus = AutomaticMemorySaverEnabled
-            ? "Automatic Memory Saver is on. EcoQoS follows each app's idle/load rules; selected working sets may be trimmed at high memory pressure, no more than once every 30 minutes per process."
-            : "Automatic Memory Saver is off. SleepOS-applied efficiency settings will be restored on the next evaluation; automatic working-set trimming is disabled.";
+            ? "Automatic Memory Saver is on. After the selected idle delay, Windows will prefer reclaiming pages from opted-in apps when needed; a working-set trim may also be requested at most every 30 minutes. Pages used again can return."
+            : "Automatic Memory Saver is off. Temporary memory-priority and efficiency policies will be restored on the next evaluation; automatic working-set trimming is disabled.";
         OnPropertyChanged(nameof(AutomaticMemorySaverEnabled));
         OnPropertyChanged(nameof(MemorySaverStatus));
     }
@@ -1590,8 +1624,12 @@ public partial class MainWindowViewModel : ObservableObject
     {
         _isClosing = true;
         var efficiencyResult = _processManagementService.RestoreEfficiencyModes();
+        var memoryPriorityResult = _processManagementService.RestoreMemoryPriorities();
         var priorityResult = _processManagementService.RestoreProcessPriorities();
-        var failures = efficiencyResult.Failures.Concat(priorityResult.Failures).ToArray();
+        var failures = efficiencyResult.Failures
+            .Concat(memoryPriorityResult.Failures)
+            .Concat(priorityResult.Failures)
+            .ToArray();
         if (failures.Length > 0)
         {
             foreach (var failure in failures)
@@ -1599,7 +1637,7 @@ public partial class MainWindowViewModel : ObservableObject
                 Trace.TraceError("SleepOS could not restore a temporary process policy: {0}", failure);
             }
 
-            MemorySaverStatus = $"Restored {efficiencyResult.UpdatedCount:N0} efficiency and {priorityResult.UpdatedCount:N0} priority policy(ies); {failures.Length:N0} could not be restored.";
+            MemorySaverStatus = $"Restored {efficiencyResult.UpdatedCount:N0} efficiency, {memoryPriorityResult.UpdatedCount:N0} memory-priority, and {priorityResult.UpdatedCount:N0} process-priority policy(ies); {failures.Length:N0} could not be restored.";
             OnPropertyChanged(nameof(MemorySaverStatus));
         }
     }
@@ -1828,7 +1866,8 @@ public partial class MainWindowViewModel : ObservableObject
         if (!settings.AutomaticMemorySaverEnabled &&
             !(settings.AutomaticGamingModeEnabled && gameActive) &&
             !settings.AutomaticHighCpuAnalysisEnabled &&
-            _automaticEfficiencyProcesses.Count == 0)
+            _automaticEfficiencyProcesses.Count == 0 &&
+            _automaticMemoryPriorityProcesses.Count == 0)
         {
             Interlocked.Exchange(ref _automationInProgress, 0);
             return;
@@ -1867,6 +1906,9 @@ public partial class MainWindowViewModel : ObservableObject
                     ? used / total * 100d
                     : (double?)null;
                 var trimCandidates = new List<ManagedProcessCandidate>();
+                var memoryPriorityUpdated = 0;
+                var memoryPriorityRestored = 0;
+                var memoryPriorityFailures = new List<string>();
                 var seen = new HashSet<(int ProcessId, long StartTimeTicks)>();
 
                 foreach (var process in scan.Processes)
@@ -1908,6 +1950,40 @@ public partial class MainWindowViewModel : ObservableObject
                         _processManagementService.SetEfficiencyMode([process], enabled: false);
                     }
 
+                    var shouldLowerMemoryPriority = rule is not null && PerformancePolicyRules.ShouldLowerMemoryPriority(
+                        automaticMemorySaverEnabled: settings.AutomaticMemorySaverEnabled && policy.Name != "Gaming",
+                        appOptedIn: rule.TrimWorkingSetOnHighMemory,
+                        isGame: games.Contains(process.Name),
+                        hasVisibleWindow: process.HasVisibleWindow,
+                        isForeground: process.IsForeground,
+                        inactiveFor: process.InactiveFor,
+                        inactivityThresholdMinutes: rule.InactivityMinutes,
+                        memorySaverLevel: settings.MemorySaverLevel);
+                    if (shouldLowerMemoryPriority && !_automaticMemoryPriorityProcesses.ContainsKey(key))
+                    {
+                        var result = _processManagementService.SetMemoryPriority([process], enabled: true);
+                        if (result.UpdatedCount > 0)
+                        {
+                            _automaticMemoryPriorityProcesses[key] = process;
+                            memoryPriorityUpdated += result.UpdatedCount;
+                        }
+                        else if (result.Failures.Count > 0)
+                        {
+                            Trace.TraceWarning("SleepOS could not lower the memory priority for {0}: {1}", process.Name, string.Join(" ", result.Failures));
+                            memoryPriorityFailures.AddRange(result.Failures.Take(2));
+                        }
+                    }
+                    else if (!shouldLowerMemoryPriority && _automaticMemoryPriorityProcesses.TryRemove(key, out _))
+                    {
+                        var result = _processManagementService.SetMemoryPriority([process], enabled: false);
+                        memoryPriorityRestored += result.UpdatedCount;
+                        if (result.Failures.Count > 0)
+                        {
+                            Trace.TraceWarning("SleepOS could not restore the memory priority for {0}: {1}", process.Name, string.Join(" ", result.Failures));
+                            memoryPriorityFailures.AddRange(result.Failures.Take(2));
+                        }
+                    }
+
                     var lastTrimUtc = _automaticWorkingSetTrimmedAtUtc.TryGetValue(key, out var previousTrimUtc)
                         ? previousTrimUtc
                         : (DateTime?)null;
@@ -1923,38 +1999,81 @@ public partial class MainWindowViewModel : ObservableObject
                             inactivityThresholdMinutes: rule.InactivityMinutes,
                             lastTrimUtc: lastTrimUtc,
                             nowUtc: DateTime.UtcNow,
-                            cooldown: AutomaticWorkingSetTrimCooldown))
+                            cooldown: AutomaticWorkingSetTrimCooldown,
+                            memorySaverLevel: settings.MemorySaverLevel))
                     {
                         trimCandidates.Add(process);
                     }
                 }
 
-                if (!_isClosing && trimCandidates.Count > 0)
+                var trimResult = !_isClosing && trimCandidates.Count > 0
+                    ? _processManagementService.TrimWorkingSets(trimCandidates)
+                    : new ProcessMemoryTrimResult(0, 0, []);
+
+                foreach (var key in _automaticEfficiencyProcesses.Keys.Where(key => !seen.Contains(key)).ToArray())
                 {
-                    var trimResult = _processManagementService.TrimWorkingSets(trimCandidates);
-                    var trimmedAtUtc = DateTime.UtcNow;
-                    foreach (var process in trimCandidates)
+                    _automaticEfficiencyProcesses.TryRemove(key, out _);
+                }
+
+                foreach (var key in _automaticMemoryPriorityProcesses.Keys.Where(key => !seen.Contains(key)).ToArray())
+                {
+                    if (_automaticMemoryPriorityProcesses.TryRemove(key, out var process))
                     {
-                        _automaticWorkingSetTrimmedAtUtc[(process.ProcessId, process.StartTimeUtcTicks)] = trimmedAtUtc;
+                        var result = _processManagementService.SetMemoryPriority([process], enabled: false);
+                        memoryPriorityRestored += result.UpdatedCount;
+                        if (result.Failures.Count > 0)
+                        {
+                            Trace.TraceWarning("SleepOS could not restore memory priority for PID {0}: {1}", key.ProcessId, string.Join(" ", result.Failures));
+                            memoryPriorityFailures.AddRange(result.Failures.Take(2));
+                        }
+                    }
+                }
+
+                if (!_isClosing &&
+                    (memoryPriorityUpdated > 0 || memoryPriorityRestored > 0 || memoryPriorityFailures.Count > 0 || trimCandidates.Count > 0))
+                {
+                    if (trimCandidates.Count > 0)
+                    {
+                        var trimmedAtUtc = DateTime.UtcNow;
+                        foreach (var process in trimCandidates)
+                        {
+                            _automaticWorkingSetTrimmedAtUtc[(process.ProcessId, process.StartTimeUtcTicks)] = trimmedAtUtc;
+                        }
                     }
 
-                    var trimMessage =
-                        $"Automatic RAM trim: requested for {trimResult.TrimmedCount:N0} idle app process(es); measured reduction {trimResult.ObservedReductionMb:F1} MB. Apps may allocate it again.";
+                    var statusParts = new List<string>();
+                    if (_automaticMemoryPriorityProcesses.Count > 0)
+                    {
+                        statusParts.Add($"Windows now prefers reclaiming pages from {_automaticMemoryPriorityProcesses.Count:N0} opted-in idle app(s) under pressure.");
+                    }
+
+                    if (memoryPriorityRestored > 0)
+                    {
+                        statusParts.Add($"Restored normal memory priority for {memoryPriorityRestored:N0} app(s) no longer eligible for Memory Saver.");
+                    }
+
+                    if (trimCandidates.Count > 0)
+                    {
+                        statusParts.Add(
+                            $"Requested a working-set trim for {trimResult.TrimmedCount:N0} app(s); measured reduction {trimResult.ObservedReductionMb:F1} MB. Apps may allocate pages again.");
+                    }
+
                     if (trimResult.Failures.Count > 0)
                     {
-                        trimMessage += $" {trimResult.Failures.Count:N0} could not be trimmed: {string.Join(" ", trimResult.Failures.Take(2))}";
+                        statusParts.Add($"{trimResult.Failures.Count:N0} could not be trimmed: {string.Join(" ", trimResult.Failures.Take(2))}");
                     }
 
+                    if (memoryPriorityFailures.Count > 0)
+                    {
+                        statusParts.Add($"Memory-priority policy failures: {string.Join(" ", memoryPriorityFailures.Take(2))}");
+                    }
+
+                    var trimMessage = string.Join(" ", statusParts);
                     System.Windows.Application.Current?.Dispatcher.BeginInvoke(() =>
                     {
                         MemorySaverStatus = trimMessage;
                         OnPropertyChanged(nameof(MemorySaverStatus));
                     });
-                }
-
-                foreach (var key in _automaticEfficiencyProcesses.Keys.Where(key => !seen.Contains(key)).ToArray())
-                {
-                    _automaticEfficiencyProcesses.TryRemove(key, out _);
                 }
 
                 foreach (var key in _automaticWorkingSetTrimmedAtUtc.Keys.Where(key => !seen.Contains(key)).ToArray())
@@ -1976,6 +2095,7 @@ public partial class MainWindowViewModel : ObservableObject
                 if (_isClosing)
                 {
                     _processManagementService.RestoreEfficiencyModes();
+                    _processManagementService.RestoreMemoryPriorities();
                 }
 
                 Interlocked.Exchange(ref _automationInProgress, 0);
@@ -2019,6 +2139,9 @@ public partial class MainWindowViewModel : ObservableObject
         OnPropertyChanged(nameof(StartMinimized));
         OnPropertyChanged(nameof(StartupDelaySeconds));
         AutomaticMemorySaverEnabled = settings.AutomaticMemorySaverEnabled;
+        _memorySaverLevel = NormalizeMemorySaverLevel(settings.MemorySaverLevel);
+        OnPropertyChanged(nameof(MemorySaverLevel));
+        OnPropertyChanged(nameof(MemorySaverLevelDescription));
         AutomaticGamingModeEnabled = settings.AutomaticGamingModeEnabled;
         AutomaticHighCpuAnalysisEnabled = settings.AutomaticHighCpuAnalysisEnabled;
         ManagedApplications.Clear();
@@ -2055,6 +2178,13 @@ public partial class MainWindowViewModel : ObservableObject
         "extreme performance" => "Extreme Performance",
         "battery saver" or "low activity" => "Battery Saver",
         "custom" => "Custom",
+        _ => "Balanced"
+    };
+
+    private static string NormalizeMemorySaverLevel(string? level) => level?.Trim().ToLowerInvariant() switch
+    {
+        "moderate" => "Moderate",
+        "maximum" => "Maximum",
         _ => "Balanced"
     };
 

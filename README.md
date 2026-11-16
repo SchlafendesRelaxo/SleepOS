@@ -21,7 +21,7 @@ SleepOS is a Windows desktop application for system monitoring, maintenance, and
 ### Configure performance behavior
 
 - Choose Balanced, Gaming, Extreme Performance, or Battery Saver policies.
-- Opt in to per-app Memory Saver rules and set an inactivity delay for each app. For each rule, automatic working-set trimming can be enabled; with automatic Memory Saver on, SleepOS may request a trim at the selected mode's high-memory threshold and no more than once every 30 minutes per process.
+- Opt in to per-app Memory Saver rules and set an inactivity delay for each app. Choose Moderate, Balanced, or Maximum: these scale the app's idle delay to 2x, 1x, or half (minimum one minute). With automatic Memory Saver on, SleepOS lowers Windows memory priority for opted-in idle apps (except during gaming); Windows then prefers reclaiming their pages when needed. The selected performance profile's high-memory threshold controls the additional working-set trim, limited to once every 30 minutes per process.
 - Enable automatic Memory Saver, game detection, and high-CPU analysis independently.
 - Define game profiles for detected or user-added executables. SleepOS restores its temporary process policies when the game ends or SleepOS exits.
 - Capture and save CPU, RAM, and background-process benchmark readings. Results are observed system deltas, not guaranteed improvements; SleepOS does not invent FPS gains.
@@ -42,7 +42,8 @@ SleepOS is a Windows desktop application for system monitoring, maintenance, and
 ## Safety and limitations
 
 - EcoQoS changes CPU and power scheduling; it does not free allocated RAM.
-- Working-set trimming is temporary and can cause an app to reload data or stutter. It is an explicit action, not an automatic Memory Saver behavior.
+- Lower memory priority is a Windows eviction preference, not a memory cap. It remains active while the app meets its opt-in idle rules, but pages the app uses again can return to RAM.
+- Working-set trimming is temporary and can cause an app to reload data or stutter. Windows may repopulate the working set when the app needs those pages.
 - Memory Saver never suspends or terminates processes. When automation is enabled, it only targets opted-in, eligible apps that meet its inactivity and system-load rules.
 - Windows-folder processes, Windows services, and SleepOS are protected from process actions. Automated EcoQoS and working-set trimming also avoid foreground apps and recognized active games.
 - Process access can be denied by Windows. SleepOS reports failures instead of requiring administrator rights by default.

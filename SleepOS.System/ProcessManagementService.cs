@@ -37,6 +37,7 @@ public sealed record ProcessStopResult(int StoppedCount, IReadOnlyList<string> F
 public sealed record ProcessEfficiencyResult(int UpdatedCount, IReadOnlyList<string> Failures);
 public sealed record ProcessMemoryTrimResult(int TrimmedCount, double ObservedReductionMb, IReadOnlyList<string> Failures);
 public sealed record ProcessPriorityResult(int UpdatedCount, IReadOnlyList<string> Failures);
+public sealed record ProcessMemoryPriorityResult(int UpdatedCount, IReadOnlyList<string> Failures);
 
 public sealed record ProcessRecommendation(string Title, string Details, bool IsSuggestedForReview);
 
@@ -74,7 +75,7 @@ public static class ProcessRecommendationRules
                 true);
     }
 
-    public static bool CanTrimWorkingSet(bool isRecognizedGame, bool isForeground) =>
+    public static bool CanAdjustBackgroundMemory(bool isRecognizedGame, bool isForeground) =>
         !isRecognizedGame && !isForeground;
 }
 
@@ -83,6 +84,8 @@ public interface IProcessManagementService
     ProcessScanResult GetStoppableProcesses(IReadOnlySet<string>? activeGameProcessNames = null);
     ProcessStopResult StopSelectedProcesses(IEnumerable<ManagedProcessCandidate> candidates);
     ProcessMemoryTrimResult TrimWorkingSets(IEnumerable<ManagedProcessCandidate> candidates);
+    ProcessMemoryPriorityResult SetMemoryPriority(IEnumerable<ManagedProcessCandidate> candidates, bool enabled);
+    ProcessMemoryPriorityResult RestoreMemoryPriorities();
     ProcessEfficiencyResult SetEfficiencyMode(IEnumerable<ManagedProcessCandidate> candidates, bool enabled);
     ProcessEfficiencyResult RestoreEfficiencyModes();
     ProcessPriorityResult SetPriority(IEnumerable<ManagedProcessCandidate> candidates, ProcessPriorityClass? priorityClass);
@@ -96,11 +99,14 @@ public sealed class ProcessManagementService : IProcessManagementService
     private const uint ProcessQueryInformation = 0x0400;
     private const uint ProcessQueryLimitedInformation = 0x1000;
     private const uint ExecutionSpeedThrottling = 0x1;
+    private const uint LowMemoryPriority = 2;
+    private const int ProcessMemoryPriorityInformationClass = 0;
     private const int ProcessPowerThrottlingInformation = 4;
     private readonly object _cpuSamplesLock = new();
     private readonly Dictionary<int, (long StartTimeTicks, TimeSpan CpuTime, DateTime SampledAt)> _cpuSamples = [];
     private readonly Dictionary<(int ProcessId, long StartTimeTicks), DateTime> _inactiveSince = [];
     private readonly Dictionary<(int ProcessId, long StartTimeTicks), ProcessPowerThrottlingState> _originalPowerStates = [];
+    private readonly Dictionary<(int ProcessId, long StartTimeTicks), (uint OriginalPriority, uint AppliedPriority)> _originalMemoryPriorities = [];
     private readonly Dictionary<(int ProcessId, long StartTimeTicks), ProcessPriorityClass> _originalPriorities = [];
     private readonly object _powerStatesLock = new();
 
@@ -317,7 +323,7 @@ public sealed class ProcessManagementService : IProcessManagementService
                 }
 
                 var isRecognizedGame = string.Equals(candidate.Recommendation, "Active game", StringComparison.Ordinal);
-                if (!ProcessRecommendationRules.CanTrimWorkingSet(isRecognizedGame, process.Id == foregroundProcessId))
+                if (!ProcessRecommendationRules.CanAdjustBackgroundMemory(isRecognizedGame, process.Id == foregroundProcessId))
                 {
                     failures.Add($"{candidate.Name}: the active game or foreground process is protected.");
                     continue;
@@ -372,6 +378,258 @@ public sealed class ProcessManagementService : IProcessManagementService
         }
 
         return new ProcessMemoryTrimResult(trimmed, observedReductionMb, failures);
+    }
+
+    [SupportedOSPlatform("windows")]
+    public ProcessMemoryPriorityResult SetMemoryPriority(IEnumerable<ManagedProcessCandidate> candidates, bool enabled)
+    {
+        var updated = 0;
+        var failures = new List<string>();
+        var serviceProcessIds = GetRunningServiceProcessIds();
+        var foregroundProcessId = GetForegroundProcessId();
+
+        foreach (var candidate in candidates.DistinctBy(candidate => (candidate.ProcessId, candidate.StartTimeUtcTicks)))
+        {
+            var key = (candidate.ProcessId, candidate.StartTimeUtcTicks);
+            try
+            {
+                if (candidate.ProcessId == Environment.ProcessId || serviceProcessIds.Contains(candidate.ProcessId))
+                {
+                    failures.Add($"{candidate.Name}: SleepOS and Windows service processes are protected.");
+                    continue;
+                }
+
+                using var process = Process.GetProcessById(candidate.ProcessId);
+                var startTimeTicks = process.StartTime.ToUniversalTime().Ticks;
+                if (process.HasExited ||
+                    !string.Equals(process.ProcessName, candidate.Name, StringComparison.OrdinalIgnoreCase) ||
+                    startTimeTicks != candidate.StartTimeUtcTicks ||
+                    !string.Equals(GetEligibleExecutablePath(process), candidate.ExecutablePath, StringComparison.OrdinalIgnoreCase))
+                {
+                    if (!enabled)
+                    {
+                        RemoveSavedMemoryPriority(key);
+                    }
+
+                    failures.Add($"{candidate.Name}: process changed or is no longer eligible.");
+                    continue;
+                }
+
+                var isRecognizedGame = string.Equals(candidate.Recommendation, "Active game", StringComparison.Ordinal);
+                if (enabled && !ProcessRecommendationRules.CanAdjustBackgroundMemory(isRecognizedGame, process.Id == foregroundProcessId))
+                {
+                    failures.Add($"{candidate.Name}: the active game or foreground process is protected.");
+                    continue;
+                }
+
+                var processHandle = OpenProcess(
+                    ProcessSetInformation | ProcessQueryInformation,
+                    false,
+                    candidate.ProcessId);
+                if (processHandle == IntPtr.Zero)
+                {
+                    failures.Add($"{candidate.Name}: Windows denied access to change its memory priority.");
+                    continue;
+                }
+
+                try
+                {
+                    var state = new ProcessMemoryPriorityInformation();
+                    if (!GetProcessInformation(
+                            processHandle,
+                            ProcessMemoryPriorityInformationClass,
+                            ref state,
+                            (uint)Marshal.SizeOf<ProcessMemoryPriorityInformation>()))
+                    {
+                        failures.Add($"{candidate.Name}: Windows could not read its memory priority.");
+                        continue;
+                    }
+
+                    uint targetPriority;
+                    if (enabled)
+                    {
+                        lock (_powerStatesLock)
+                        {
+                            _originalMemoryPriorities.TryAdd(
+                                key,
+                                (state.MemoryPriority, Math.Min(state.MemoryPriority, LowMemoryPriority)));
+                        }
+
+                        targetPriority = Math.Min(state.MemoryPriority, LowMemoryPriority);
+                    }
+                    else
+                    {
+                        lock (_powerStatesLock)
+                        {
+                            if (!_originalMemoryPriorities.TryGetValue(key, out var savedPriority))
+                            {
+                                continue;
+                            }
+
+                            if (state.MemoryPriority != savedPriority.AppliedPriority)
+                            {
+                                _originalMemoryPriorities.Remove(key);
+                                continue;
+                            }
+
+                            targetPriority = savedPriority.OriginalPriority;
+                        }
+                    }
+
+                    if (state.MemoryPriority == targetPriority)
+                    {
+                        if (!enabled)
+                        {
+                            RemoveSavedMemoryPriority(key);
+                        }
+
+                        updated++;
+                        continue;
+                    }
+
+                    var target = new ProcessMemoryPriorityInformation { MemoryPriority = targetPriority };
+                    if (!SetProcessInformation(
+                            processHandle,
+                            ProcessMemoryPriorityInformationClass,
+                            ref target,
+                            (uint)Marshal.SizeOf<ProcessMemoryPriorityInformation>()))
+                    {
+                        failures.Add($"{candidate.Name}: Windows could not apply the memory priority.");
+                        continue;
+                    }
+
+                    if (!enabled)
+                    {
+                        RemoveSavedMemoryPriority(key);
+                    }
+
+                    updated++;
+                }
+                finally
+                {
+                    CloseHandle(processHandle);
+                }
+            }
+            catch (Win32Exception exception)
+            {
+                failures.Add($"{candidate.Name}: {exception.Message}");
+            }
+            catch (InvalidOperationException)
+            {
+                if (!enabled)
+                {
+                    RemoveSavedMemoryPriority(key);
+                }
+
+                failures.Add($"{candidate.Name}: process already exited.");
+            }
+            catch (UnauthorizedAccessException)
+            {
+                failures.Add($"{candidate.Name}: access denied.");
+            }
+            catch (ArgumentException)
+            {
+                if (!enabled)
+                {
+                    RemoveSavedMemoryPriority(key);
+                }
+
+                failures.Add($"{candidate.Name}: process no longer exists.");
+            }
+        }
+
+        return new ProcessMemoryPriorityResult(updated, failures);
+    }
+
+    [SupportedOSPlatform("windows")]
+    public ProcessMemoryPriorityResult RestoreMemoryPriorities()
+    {
+        KeyValuePair<(int ProcessId, long StartTimeTicks), (uint OriginalPriority, uint AppliedPriority)>[] priorities;
+        lock (_powerStatesLock)
+        {
+            priorities = _originalMemoryPriorities.ToArray();
+        }
+
+        var restored = 0;
+        var failures = new List<string>();
+        foreach (var (key, savedPriority) in priorities)
+        {
+            try
+            {
+                using var process = Process.GetProcessById(key.ProcessId);
+                if (process.HasExited || process.StartTime.ToUniversalTime().Ticks != key.StartTimeTicks)
+                {
+                    RemoveSavedMemoryPriority(key);
+                    continue;
+                }
+
+                var processHandle = OpenProcess(
+                    ProcessSetInformation | ProcessQueryInformation,
+                    false,
+                    key.ProcessId);
+                if (processHandle == IntPtr.Zero)
+                {
+                    failures.Add($"PID {key.ProcessId}: Windows denied access to restore its memory priority.");
+                    continue;
+                }
+
+                try
+                {
+                    var current = new ProcessMemoryPriorityInformation();
+                    if (!GetProcessInformation(
+                            processHandle,
+                            ProcessMemoryPriorityInformationClass,
+                            ref current,
+                            (uint)Marshal.SizeOf<ProcessMemoryPriorityInformation>()))
+                    {
+                        failures.Add($"PID {key.ProcessId}: Windows could not read its memory priority for restoration.");
+                        continue;
+                    }
+
+                    if (current.MemoryPriority != savedPriority.AppliedPriority)
+                    {
+                        RemoveSavedMemoryPriority(key);
+                        continue;
+                    }
+
+                    var target = new ProcessMemoryPriorityInformation { MemoryPriority = savedPriority.OriginalPriority };
+                    if (!SetProcessInformation(
+                            processHandle,
+                            ProcessMemoryPriorityInformationClass,
+                            ref target,
+                            (uint)Marshal.SizeOf<ProcessMemoryPriorityInformation>()))
+                    {
+                        failures.Add($"PID {key.ProcessId}: Windows could not restore its memory priority.");
+                        continue;
+                    }
+
+                    restored++;
+                    RemoveSavedMemoryPriority(key);
+                }
+                finally
+                {
+                    CloseHandle(processHandle);
+                }
+            }
+            catch (Win32Exception exception)
+            {
+                failures.Add($"PID {key.ProcessId}: {exception.Message}");
+            }
+            catch (InvalidOperationException)
+            {
+                RemoveSavedMemoryPriority(key);
+            }
+            catch (UnauthorizedAccessException)
+            {
+                failures.Add($"PID {key.ProcessId}: access denied while restoring memory priority.");
+            }
+            catch (ArgumentException)
+            {
+                RemoveSavedMemoryPriority(key);
+            }
+        }
+
+        return new ProcessMemoryPriorityResult(restored, failures);
     }
 
     [SupportedOSPlatform("windows")]
@@ -736,6 +994,14 @@ public sealed class ProcessManagementService : IProcessManagementService
         }
     }
 
+    private void RemoveSavedMemoryPriority((int ProcessId, long StartTimeTicks) key)
+    {
+        lock (_powerStatesLock)
+        {
+            _originalMemoryPriorities.Remove(key);
+        }
+    }
+
     private TimeSpan GetInactiveDuration(int processId, long startTimeTicks, bool isForeground)
     {
         var key = (processId, startTimeTicks);
@@ -861,10 +1127,26 @@ public sealed class ProcessManagementService : IProcessManagementService
 
     [DllImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetProcessInformation(
+        IntPtr process,
+        int processInformationClass,
+        ref ProcessMemoryPriorityInformation processInformation,
+        uint processInformationSize);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool SetProcessInformation(
         IntPtr process,
         int processInformationClass,
         ref ProcessPowerThrottlingState processInformation,
+        uint processInformationSize);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool SetProcessInformation(
+        IntPtr process,
+        int processInformationClass,
+        ref ProcessMemoryPriorityInformation processInformation,
         uint processInformationSize);
 
     [DllImport("psapi.dll", SetLastError = true)]
@@ -881,6 +1163,12 @@ public sealed class ProcessManagementService : IProcessManagementService
         public uint Version;
         public uint ControlMask;
         public uint StateMask;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct ProcessMemoryPriorityInformation
+    {
+        public uint MemoryPriority;
     }
 
     [DllImport("user32.dll")]

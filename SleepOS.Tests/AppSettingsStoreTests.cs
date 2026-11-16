@@ -108,6 +108,7 @@ public sealed class AppSettingsStoreTests
                 StartMinimized = true,
                 StartupDelaySeconds = 30,
                 AutomaticMemorySaverEnabled = true,
+                MemorySaverLevel = "Maximum",
                 AutomaticGamingModeEnabled = true,
                 ManagedApplications =
                 [
@@ -152,6 +153,7 @@ public sealed class AppSettingsStoreTests
             Assert.True(settings.StartMinimized);
             Assert.Equal(30, settings.StartupDelaySeconds);
             Assert.True(settings.AutomaticMemorySaverEnabled);
+            Assert.Equal("Maximum", settings.MemorySaverLevel);
             Assert.True(settings.AutomaticGamingModeEnabled);
             Assert.Equal(20, Assert.Single(settings.ManagedApplications).InactivityMinutes);
             Assert.False(Assert.Single(settings.ManagedApplications).TrimWorkingSetOnHighMemory);

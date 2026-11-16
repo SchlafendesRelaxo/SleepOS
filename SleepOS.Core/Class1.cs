@@ -14,6 +14,7 @@ public sealed class AppSettings
     public bool StartMinimized { get; set; }
     public int StartupDelaySeconds { get; set; }
     public bool AutomaticMemorySaverEnabled { get; set; }
+    public string MemorySaverLevel { get; set; } = "Balanced";
     public bool AutomaticGamingModeEnabled { get; set; }
     public bool AutomaticHighCpuAnalysisEnabled { get; set; }
     public List<ApplicationPerformanceRule> ManagedApplications { get; set; } = [];

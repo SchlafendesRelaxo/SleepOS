@@ -5,6 +5,20 @@ namespace SleepOS.Tests;
 public sealed class PerformancePolicyRulesTests
 {
     [Theory]
+    [InlineData("Moderate", 10, 20)]
+    [InlineData("Balanced", 10, 10)]
+    [InlineData("Maximum", 10, 5)]
+    [InlineData("Maximum", 1, 1)]
+    [InlineData("Moderate", 60, 120)]
+    public void MemorySaverLevelScalesTheConfiguredInactivityDelay(
+        string level,
+        int configuredMinutes,
+        int expectedMinutes)
+    {
+        Assert.Equal(expectedMinutes, PerformancePolicyRules.GetMemorySaverInactivityMinutes(level, configuredMinutes));
+    }
+
+    [Theory]
     [InlineData("Balanced", 5, 85d)]
     [InlineData("Gaming", 10, 85d)]
     [InlineData("Extreme Performance", 30, null)]
@@ -94,7 +108,9 @@ public sealed class PerformancePolicyRulesTests
         Assert.False(Evaluate(memoryLoadPercent: 84.9));
         Assert.False(Evaluate(inactiveFor: TimeSpan.FromMinutes(4)));
         Assert.False(Evaluate(lastTrimUtc: now.AddMinutes(-29)));
+        Assert.False(Evaluate(memorySaverLevel: "Moderate"));
         Assert.True(Evaluate(lastTrimUtc: now.AddMinutes(-30)));
+        Assert.True(Evaluate(memorySaverLevel: "Maximum"));
 
         bool Evaluate(
             bool automaticMemorySaverEnabled = true,
@@ -104,7 +120,8 @@ public sealed class PerformancePolicyRulesTests
             bool isForeground = false,
             double? memoryLoadPercent = 85,
             TimeSpan? inactiveFor = null,
-            DateTime? lastTrimUtc = null) =>
+            DateTime? lastTrimUtc = null,
+            string memorySaverLevel = "Balanced") =>
             PerformancePolicyRules.ShouldTrimWorkingSet(
                 policy,
                 automaticMemorySaverEnabled,
@@ -117,6 +134,39 @@ public sealed class PerformancePolicyRulesTests
                 inactivityThresholdMinutes: 10,
                 lastTrimUtc,
                 now,
-                cooldown: TimeSpan.FromMinutes(30));
+                cooldown: TimeSpan.FromMinutes(30),
+                memorySaverLevel);
+    }
+
+    [Fact]
+    public void LowerMemoryPriorityRequiresAnOptedInIdleBackgroundApp()
+    {
+        Assert.True(Evaluate());
+        Assert.False(Evaluate(automaticMemorySaverEnabled: false));
+        Assert.False(Evaluate(appOptedIn: false));
+        Assert.False(Evaluate(isGame: true));
+        Assert.False(Evaluate(hasVisibleWindow: false));
+        Assert.False(Evaluate(isForeground: true));
+        Assert.False(Evaluate(inactiveFor: TimeSpan.FromMinutes(4)));
+        Assert.False(Evaluate(memorySaverLevel: "Moderate"));
+        Assert.True(Evaluate(memorySaverLevel: "Maximum"));
+
+        bool Evaluate(
+            bool automaticMemorySaverEnabled = true,
+            bool appOptedIn = true,
+            bool isGame = false,
+            bool hasVisibleWindow = true,
+            bool isForeground = false,
+            TimeSpan? inactiveFor = null,
+            string memorySaverLevel = "Balanced") =>
+            PerformancePolicyRules.ShouldLowerMemoryPriority(
+                automaticMemorySaverEnabled,
+                appOptedIn,
+                isGame,
+                hasVisibleWindow,
+                isForeground,
+                inactiveFor ?? TimeSpan.FromMinutes(10),
+                inactivityThresholdMinutes: 10,
+                memorySaverLevel);
     }
 }
