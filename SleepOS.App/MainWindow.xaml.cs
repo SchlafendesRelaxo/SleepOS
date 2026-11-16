@@ -422,6 +422,59 @@ public partial class MainWindow : Window
         }
     }
 
+    private async void TrimSelectedProcessesMemory_Click(object sender, RoutedEventArgs e)
+    {
+        if (DataContext is not ViewModels.MainWindowViewModel viewModel)
+        {
+            return;
+        }
+
+        var selectedProcesses = viewModel.SelectedStoppableProcesses;
+        if (selectedProcesses.Count == 0)
+        {
+            await viewModel.TrimSelectedProcessesMemoryAsync();
+            return;
+        }
+
+        var processDetails = string.Join(
+            Environment.NewLine,
+            selectedProcesses.Take(5).Select(process =>
+                $"{process.Name} (PID {process.ProcessId}) — {process.MemoryMb:F0} MB working set"));
+        if (selectedProcesses.Count > 5)
+        {
+            processDetails += $"{Environment.NewLine}...and {selectedProcesses.Count - 5:N0} more selected process(es).";
+        }
+
+        var confirmation = MessageBox.Show(
+            this,
+            $"Ask Windows to trim the resident working set of these {selectedProcesses.Count:N0} selected app process(es)?\n\n{processDetails}\n\nThis may cause apps to reload data or stutter, and they can allocate memory again. It does not reduce their committed memory.",
+            "Confirm temporary RAM trim",
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Warning);
+        if (confirmation != MessageBoxResult.Yes)
+        {
+            return;
+        }
+
+        var button = sender as Button;
+        if (button is not null)
+        {
+            button.IsEnabled = false;
+        }
+
+        try
+        {
+            await viewModel.TrimSelectedProcessesMemoryAsync();
+        }
+        finally
+        {
+            if (button is not null)
+            {
+                button.IsEnabled = true;
+            }
+        }
+    }
+
     private async void RemoveDuplicateDesktopShortcuts_Click(object sender, RoutedEventArgs e)
     {
         if (DataContext is not ViewModels.MainWindowViewModel viewModel)

@@ -986,6 +986,49 @@ public partial class MainWindowViewModel : ObservableObject
         OnPropertyChanged(nameof(ProcessManagementStatus));
     }
 
+    public async Task TrimSelectedProcessesMemoryAsync()
+    {
+        var selectedProcesses = SelectedStoppableProcesses;
+        if (selectedProcesses.Count == 0)
+        {
+            ProcessManagementStatus = "Tick one or more app checkboxes in the list first.";
+            OnPropertyChanged(nameof(ProcessManagementStatus));
+            return;
+        }
+
+        try
+        {
+            var result = await Task.Run(() => _processManagementService.TrimWorkingSets(selectedProcesses));
+            var summary =
+                $"Requested a working-set trim for {result.TrimmedCount:N0} process(es); measured reduction: {result.ObservedReductionMb:F1} MB. This is temporary, and apps may allocate the memory again.";
+            if (result.Failures.Count > 0)
+            {
+                summary += $" {result.Failures.Count:N0} could not be trimmed: {string.Join(" ", result.Failures.Take(2))}";
+            }
+
+            await ScanStoppableProcessesAsync();
+            ProcessManagementStatus = $"{summary} {ProcessManagementStatus}";
+        }
+        catch (Win32Exception exception)
+        {
+            ProcessManagementStatus = $"Could not trim selected working sets: {exception.Message}";
+        }
+        catch (InvalidOperationException exception)
+        {
+            ProcessManagementStatus = $"Could not trim selected working sets: {exception.Message}";
+        }
+        catch (UnauthorizedAccessException exception)
+        {
+            ProcessManagementStatus = $"Could not trim selected working sets: {exception.Message}";
+        }
+        catch (IOException exception)
+        {
+            ProcessManagementStatus = $"Could not trim selected working sets: {exception.Message}";
+        }
+
+        OnPropertyChanged(nameof(ProcessManagementStatus));
+    }
+
     [RelayCommand]
     public void AddSelectedToMemorySaver()
     {

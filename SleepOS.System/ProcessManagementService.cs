@@ -35,6 +35,7 @@ public sealed record ProcessScanResult(IReadOnlyList<ManagedProcessCandidate> Pr
 
 public sealed record ProcessStopResult(int StoppedCount, IReadOnlyList<string> Failures);
 public sealed record ProcessEfficiencyResult(int UpdatedCount, IReadOnlyList<string> Failures);
+public sealed record ProcessMemoryTrimResult(int TrimmedCount, double ObservedReductionMb, IReadOnlyList<string> Failures);
 public sealed record ProcessPriorityResult(int UpdatedCount, IReadOnlyList<string> Failures);
 
 public sealed record ProcessRecommendation(string Title, string Details, bool IsSuggestedForReview);
@@ -72,12 +73,16 @@ public static class ProcessRecommendationRules
                 "No visible window and publisher metadata is missing. This does not mean it is unsafe or unnecessary; check its description and path before closing.",
                 true);
     }
+
+    public static bool CanTrimWorkingSet(bool isRecognizedGame, bool isForeground) =>
+        !isRecognizedGame && !isForeground;
 }
 
 public interface IProcessManagementService
 {
     ProcessScanResult GetStoppableProcesses(IReadOnlySet<string>? activeGameProcessNames = null);
     ProcessStopResult StopSelectedProcesses(IEnumerable<ManagedProcessCandidate> candidates);
+    ProcessMemoryTrimResult TrimWorkingSets(IEnumerable<ManagedProcessCandidate> candidates);
     ProcessEfficiencyResult SetEfficiencyMode(IEnumerable<ManagedProcessCandidate> candidates, bool enabled);
     ProcessEfficiencyResult RestoreEfficiencyModes();
     ProcessPriorityResult SetPriority(IEnumerable<ManagedProcessCandidate> candidates, ProcessPriorityClass? priorityClass);
@@ -87,6 +92,8 @@ public interface IProcessManagementService
 public sealed class ProcessManagementService : IProcessManagementService
 {
     private const uint ProcessSetInformation = 0x0200;
+    private const uint ProcessSetQuota = 0x0100;
+    private const uint ProcessQueryInformation = 0x0400;
     private const uint ProcessQueryLimitedInformation = 0x1000;
     private const uint ExecutionSpeedThrottling = 0x1;
     private const int ProcessPowerThrottlingInformation = 4;
@@ -277,6 +284,94 @@ public sealed class ProcessManagementService : IProcessManagementService
         }
 
         return new ProcessStopResult(stopped, failures);
+    }
+
+    [SupportedOSPlatform("windows")]
+    public ProcessMemoryTrimResult TrimWorkingSets(IEnumerable<ManagedProcessCandidate> candidates)
+    {
+        var trimmed = 0;
+        var observedReductionMb = 0d;
+        var failures = new List<string>();
+        var serviceProcessIds = GetRunningServiceProcessIds();
+        var foregroundProcessId = GetForegroundProcessId();
+
+        foreach (var candidate in candidates.DistinctBy(candidate => (candidate.ProcessId, candidate.StartTimeUtcTicks)))
+        {
+            try
+            {
+                if (candidate.ProcessId == Environment.ProcessId || serviceProcessIds.Contains(candidate.ProcessId))
+                {
+                    failures.Add($"{candidate.Name}: SleepOS and Windows service processes are protected.");
+                    continue;
+                }
+
+                using var process = Process.GetProcessById(candidate.ProcessId);
+                var startTimeTicks = process.StartTime.ToUniversalTime().Ticks;
+                if (process.HasExited ||
+                    !string.Equals(process.ProcessName, candidate.Name, StringComparison.OrdinalIgnoreCase) ||
+                    startTimeTicks != candidate.StartTimeUtcTicks ||
+                    !string.Equals(GetEligibleExecutablePath(process), candidate.ExecutablePath, StringComparison.OrdinalIgnoreCase))
+                {
+                    failures.Add($"{candidate.Name}: process changed or is no longer eligible.");
+                    continue;
+                }
+
+                var isRecognizedGame = string.Equals(candidate.Recommendation, "Active game", StringComparison.Ordinal);
+                if (!ProcessRecommendationRules.CanTrimWorkingSet(isRecognizedGame, process.Id == foregroundProcessId))
+                {
+                    failures.Add($"{candidate.Name}: the active game or foreground process is protected.");
+                    continue;
+                }
+
+                process.Refresh();
+                var beforeBytes = process.WorkingSet64;
+                var processHandle = OpenProcess(
+                    ProcessSetQuota | ProcessQueryInformation | ProcessQueryLimitedInformation,
+                    false,
+                    candidate.ProcessId);
+                if (processHandle == IntPtr.Zero)
+                {
+                    failures.Add($"{candidate.Name}: {new Win32Exception(Marshal.GetLastWin32Error()).Message}");
+                    continue;
+                }
+
+                try
+                {
+                    if (!EmptyWorkingSet(processHandle))
+                    {
+                        failures.Add($"{candidate.Name}: {new Win32Exception(Marshal.GetLastWin32Error()).Message}");
+                        continue;
+                    }
+
+                    process.Refresh();
+                    var afterBytes = process.WorkingSet64;
+                    observedReductionMb += Math.Max(0, beforeBytes - afterBytes) / (1024d * 1024d);
+                    trimmed++;
+                }
+                finally
+                {
+                    CloseHandle(processHandle);
+                }
+            }
+            catch (Win32Exception exception)
+            {
+                failures.Add($"{candidate.Name}: {exception.Message}");
+            }
+            catch (InvalidOperationException)
+            {
+                failures.Add($"{candidate.Name}: process already exited.");
+            }
+            catch (UnauthorizedAccessException)
+            {
+                failures.Add($"{candidate.Name}: access denied.");
+            }
+            catch (ArgumentException)
+            {
+                failures.Add($"{candidate.Name}: process no longer exists.");
+            }
+        }
+
+        return new ProcessMemoryTrimResult(trimmed, observedReductionMb, failures);
     }
 
     [SupportedOSPlatform("windows")]
@@ -771,6 +866,10 @@ public sealed class ProcessManagementService : IProcessManagementService
         int processInformationClass,
         ref ProcessPowerThrottlingState processInformation,
         uint processInformationSize);
+
+    [DllImport("psapi.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool EmptyWorkingSet(IntPtr process);
 
     [DllImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]

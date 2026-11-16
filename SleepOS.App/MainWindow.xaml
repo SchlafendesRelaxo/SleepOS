@@ -1184,21 +1184,6 @@
                                                            Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" Margin="0,6,0,0"/>
                                             </StackPanel>
                                         </Grid>
-                                        <WrapPanel Margin="0,16,0,12">
-                                            <Button Content="Add selected to game profiles" Style="{StaticResource ActionButton}"
-                                                    Command="{Binding AddSelectedToGameProfilesCommand}" Margin="0,0,8,8"/>
-                                            <Button Content="Apply EcoQoS" Style="{StaticResource ActionButton}"
-                                                    Command="{Binding ApplyEfficiencyModeToSelectedCommand}" Margin="0,0,8,8"/>
-                                            <Button Content="Restore policy" Style="{StaticResource ActionButton}"
-                                                    Command="{Binding RestoreEfficiencyModeForSelectedCommand}" Margin="0,0,8,8"/>
-                                            <Button Content="Set BelowNormal priority" Style="{StaticResource ActionButton}"
-                                                    Command="{Binding SetSelectedProcessesToBelowNormalCommand}" Margin="0,0,8,8"/>
-                                            <Button Content="Restore priority" Style="{StaticResource ActionButton}"
-                                                    Command="{Binding RestoreSelectedProcessPrioritiesCommand}" Margin="0,0,8,8"/>
-                                            <Button Content="Stop selected" Style="{StaticResource ActionButton}"
-                                                    Click="StopSelectedProcesses_Click" Background="{DynamicResource DangerBrush}"
-                                                    BorderBrush="{DynamicResource DangerBorderBrush}" Foreground="{DynamicResource DangerTextBrush}"/>
-                                        </WrapPanel>
                                         <ListView ItemsSource="{Binding ManageableProcesses}" Background="{DynamicResource ListBrush}"
                                                   BorderBrush="{DynamicResource LineBrush}" BorderThickness="1"
                                                   MaxHeight="390" MinHeight="90">
@@ -1277,8 +1262,27 @@
                                                 </DataTemplate>
                                             </ListView.ItemTemplate>
                                         </ListView>
+                                        <TextBlock Text="Tick the app checkboxes above, then choose an action. EcoQoS and priority affect CPU scheduling; Trim selected RAM requests a temporary working-set trim."
+                                                   Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" Margin="0,12,0,4"/>
                                         <TextBlock Text="{Binding ProcessManagementStatus}" Foreground="{DynamicResource AccentBrush}"
-                                                   TextWrapping="Wrap" Margin="0,12,0,0"/>
+                                                   TextWrapping="Wrap" Margin="0,0,0,10"/>
+                                        <WrapPanel>
+                                            <Button Content="Add selected to game profiles" Style="{StaticResource ActionButton}"
+                                                    Command="{Binding AddSelectedToGameProfilesCommand}" Margin="0,0,8,8"/>
+                                            <Button Content="Apply EcoQoS" Style="{StaticResource ActionButton}"
+                                                    Command="{Binding ApplyEfficiencyModeToSelectedCommand}" Margin="0,0,8,8"/>
+                                            <Button Content="Restore policy" Style="{StaticResource ActionButton}"
+                                                    Command="{Binding RestoreEfficiencyModeForSelectedCommand}" Margin="0,0,8,8"/>
+                                            <Button Content="Set BelowNormal priority" Style="{StaticResource ActionButton}"
+                                                    Command="{Binding SetSelectedProcessesToBelowNormalCommand}" Margin="0,0,8,8"/>
+                                            <Button Content="Restore priority" Style="{StaticResource ActionButton}"
+                                                    Command="{Binding RestoreSelectedProcessPrioritiesCommand}" Margin="0,0,8,8"/>
+                                            <Button Content="Trim selected RAM" Style="{StaticResource ActionButton}"
+                                                    Click="TrimSelectedProcessesMemory_Click" Margin="0,0,8,8"/>
+                                            <Button Content="Stop selected" Style="{StaticResource ActionButton}"
+                                                    Click="StopSelectedProcesses_Click" Background="{DynamicResource DangerBrush}"
+                                                    BorderBrush="{DynamicResource DangerBorderBrush}" Foreground="{DynamicResource DangerTextBrush}"/>
+                                        </WrapPanel>
                                     </StackPanel>
                                 </Border>
                             </StackPanel>

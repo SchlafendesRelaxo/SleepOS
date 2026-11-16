@@ -63,6 +63,14 @@ public sealed class ProcessManagementServiceTests
     }
 
     [Fact]
+    public void WorkingSetTrimProtectsActiveGamesAndForegroundProcesses()
+    {
+        Assert.False(ProcessRecommendationRules.CanTrimWorkingSet(isRecognizedGame: true, isForeground: false));
+        Assert.False(ProcessRecommendationRules.CanTrimWorkingSet(isRecognizedGame: false, isForeground: true));
+        Assert.True(ProcessRecommendationRules.CanTrimWorkingSet(isRecognizedGame: false, isForeground: false));
+    }
+
+    [Fact]
     public void FlagsUnknownBackgroundPublisherForReviewButExplainsTheLimitation()
     {
         var recommendation = ProcessRecommendationRules.Evaluate(
