@@ -60,14 +60,12 @@ public partial class MainWindowViewModel : ObservableObject
 
         UpdateSettings(_settingsStore.Load());
         LoadProfiles();
-        LoadTweaks();
         RefreshMetrics();
     }
 
     public ObservableCollection<DashboardMetricCard> HardwareCards { get; } = new();
     public ObservableCollection<RecentOptimizationEntry> RecentOptimizations { get; } = new();
     public ObservableCollection<OptimizationProfile> Profiles { get; } = new();
-    public ObservableCollection<TweakCategory> TweakCategories { get; } = new();
     public ObservableCollection<ProcessPerformance> RunningProcesses { get; } = new();
     public ObservableCollection<ManagedProcessCandidate> ManageableProcesses { get; } = new();
     public ObservableCollection<GameSession> ActiveGames { get; } = new();
@@ -910,48 +908,6 @@ public partial class MainWindowViewModel : ObservableObject
     }
 
     [RelayCommand]
-    public void RunTweak(string tweakId)
-    {
-        var tweak = TweakCategories.SelectMany(category => category.Tweaks)
-            .FirstOrDefault(candidate => string.Equals(candidate.Id, tweakId, StringComparison.Ordinal));
-        if (tweak is null)
-        {
-            ActionStatus = "That tweak is not available.";
-            OnPropertyChanged(nameof(ActionStatus));
-            return;
-        }
-
-        try
-        {
-            switch (tweak.Id)
-            {
-                case "dns-cache":
-                    _systemService.ClearDnsCache();
-                    ActionStatus = "DNS cache cleared. The DNS server itself was not changed.";
-                    break;
-                case "explorer":
-                    _systemService.RestartExplorer();
-                    ActionStatus = "File Explorer restarted. Its windows may briefly close or refresh.";
-                    break;
-                default:
-                    _systemService.OpenWindowsTweakSettings(tweak.Id);
-                    ActionStatus = $"{tweak.Name} settings opened. Review and apply changes in Windows.";
-                    break;
-            }
-        }
-        catch (InvalidOperationException exception)
-        {
-            ActionStatus = $"Could not run {tweak.Name}: {exception.Message}";
-        }
-        catch (Win32Exception exception)
-        {
-            ActionStatus = $"Could not run {tweak.Name}: {exception.Message}";
-        }
-
-        OnPropertyChanged(nameof(ActionStatus));
-    }
-
-    [RelayCommand]
     public void OpenWindowsUpdateSettings() => OpenWindowsSettings(
         _systemService.OpenWindowsUpdateSettings, "Windows Update");
 
@@ -1107,153 +1063,4 @@ public partial class MainWindowViewModel : ObservableObject
         }
     }
 
-    private void LoadTweaks()
-    {
-        TweakCategories.Clear();
-        TweakCategories.Add(new TweakCategory
-        {
-            Name = "Gaming",
-            Description = "Windows features for game focus, overlays, and recording. Review each setting before changing it.",
-            Tweaks =
-            [
-                new TweakDefinition
-                {
-                    Id = "game-mode", Name = "Game Mode", Category = "Gaming",
-                    Description = "Windows can prioritize game-related work. The result depends on Windows and your hardware; extra FPS is not guaranteed.",
-                    ActionLabel = "Open Game Mode"
-                },
-                new TweakDefinition
-                {
-                    Id = "game-dvr", Name = "Background captures", Category = "Gaming",
-                    Description = "Review background recording and capture options. Disabling them can remove clips and capture shortcuts.",
-                    ActionLabel = "Open capture settings"
-                },
-                new TweakDefinition
-                {
-                    Id = "game-bar", Name = "Xbox Game Bar", Category = "Gaming",
-                    Description = "Review the overlay, widgets, and shortcut settings. Turning it off can disable those features.",
-                    ActionLabel = "Open Game Bar settings"
-                }
-            ]
-        });
-
-        TweakCategories.Add(new TweakCategory
-        {
-            Name = "Visual effects",
-            Description = "Windows appearance options. These affect the desktop; game performance gains are not guaranteed.",
-            Tweaks =
-            [
-                new TweakDefinition
-                {
-                    Id = "animations", Name = "Windows animations", Category = "Visual effects",
-                    Description = "Review motion and animation effects. Reducing them changes desktop appearance and accessibility behavior.",
-                    ActionLabel = "Open animation settings"
-                },
-                new TweakDefinition
-                {
-                    Id = "transparency", Name = "Transparency effects", Category = "Visual effects",
-                    Description = "Review transparent surfaces in Windows. This is mainly a visual preference, not a guaranteed FPS tweak.",
-                    ActionLabel = "Open appearance settings"
-                }
-            ]
-        });
-
-        TweakCategories.Add(new TweakCategory
-        {
-            Name = "Startup",
-            Description = "Choose which apps start when you sign in. Disabling an app can affect sync, notifications, or updates.",
-            Tweaks =
-            [
-                new TweakDefinition
-                {
-                    Id = "startup", Name = "Startup apps", Category = "Startup",
-                    Description = "Windows shows startup entries and their reported impact. Disable only apps you recognize and do not need at sign-in.",
-                    ActionLabel = "Review startup apps"
-                }
-            ]
-        });
-
-        TweakCategories.Add(new TweakCategory
-        {
-            Name = "Privacy",
-            Description = "Review Windows privacy controls. SleepOS does not change diagnostic data, advertising, or app permissions.",
-            Tweaks =
-            [
-                new TweakDefinition
-                {
-                    Id = "telemetry", Name = "Diagnostics & feedback", Category = "Privacy",
-                    Description = "Review optional diagnostic data and feedback settings. Required Windows diagnostics may still apply.",
-                    ActionLabel = "Open diagnostics settings"
-                },
-                new TweakDefinition
-                {
-                    Id = "ad-id", Name = "Advertising ID", Category = "Privacy",
-                    Description = "Review the advertising identifier used for app personalization. This does not remove all advertising.",
-                    ActionLabel = "Open privacy settings"
-                },
-                new TweakDefinition
-                {
-                    Id = "permissions", Name = "App permissions", Category = "Privacy",
-                    Description = "Review access such as location, camera, and microphone. Restricting access can break app features.",
-                    ActionLabel = "Review permissions"
-                }
-            ]
-        });
-
-        TweakCategories.Add(new TweakCategory
-        {
-            Name = "Network",
-            Description = "Open Windows network settings or clear the DNS cache. Changing DNS does not necessarily lower game ping.",
-            Tweaks =
-            [
-                new TweakDefinition
-                {
-                    Id = "dns", Name = "DNS server", Category = "Network",
-                    Description = "Opens adapter settings so you can review or change the DNS server. Note the current values before changing them.",
-                    ActionLabel = "Open network settings"
-                },
-                new TweakDefinition
-                {
-                    Id = "dns-cache", Name = "DNS cache", Category = "Network",
-                    Description = "Clears saved name lookups. It does not change your DNS server; the first lookup afterward may take longer.",
-                    ActionLabel = "Clear DNS cache",
-                    ActionType = "SleepOS action"
-                },
-                new TweakDefinition
-                {
-                    Id = "adapter-info", Name = "Network adapter", Category = "Network",
-                    Description = "Opens Windows network status so you can review adapters and connection details. No setting is changed.",
-                    ActionLabel = "Open network status"
-                }
-            ]
-        });
-
-        TweakCategories.Add(new TweakCategory
-        {
-            Name = "File Explorer",
-            Description = "Open File Explorer Options or restart the Windows shell. These actions do not improve FPS.",
-            Tweaks =
-            [
-                new TweakDefinition
-                {
-                    Id = "hidden-files", Name = "Hidden files", Category = "File Explorer",
-                    Description = "Opens Folder Options. Showing protected or hidden files can make system files easier to change accidentally.",
-                    ActionLabel = "Open Folder Options"
-                },
-                new TweakDefinition
-                {
-                    Id = "file-extensions", Name = "File extensions", Category = "File Explorer",
-                    Description = "Opens Folder Options so you can show or hide extensions such as .exe and .txt. No performance effect.",
-                    ActionLabel = "Open Folder Options"
-                },
-                new TweakDefinition
-                {
-                    Id = "explorer", Name = "Restart File Explorer", Category = "File Explorer",
-                    Description = "Stops and relaunches the Windows shell. Taskbar and Explorer windows can briefly disappear or refresh.",
-                    ActionLabel = "Restart Explorer",
-                    ActionType = "SleepOS action"
-                }
-            ]
-        });
-    }
 }

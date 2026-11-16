@@ -9,7 +9,7 @@ The public repository already exists. To publish an update:
 
 1. Push the current source, including `.github/workflows/release.yml`, to its
    `main` branch.
-2. Push a new, higher semantic-version tag such as `v1.0.3`.
+2. Push a new, higher semantic-version tag such as `v1.0.4`.
 3. GitHub Actions runs tests, builds the x64 installer and update packages,
    and attaches the required files to that GitHub Release.
 

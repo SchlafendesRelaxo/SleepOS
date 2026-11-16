@@ -45,23 +45,6 @@ public sealed class OptimizationProfile
     public string ChangeSummary { get; set; } = string.Empty;
 }
 
-public sealed class TweakDefinition
-{
-    public string Id { get; set; } = string.Empty;
-    public string Category { get; set; } = string.Empty;
-    public string Name { get; set; } = string.Empty;
-    public string Description { get; set; } = string.Empty;
-    public string ActionLabel { get; set; } = "Open settings";
-    public string ActionType { get; set; } = "Windows setting";
-}
-
-public sealed class TweakCategory
-{
-    public string Name { get; set; } = string.Empty;
-    public string Description { get; set; } = string.Empty;
-    public List<TweakDefinition> Tweaks { get; set; } = new();
-}
-
 public sealed class DashboardMetricCard
 {
     public string Title { get; set; } = string.Empty;

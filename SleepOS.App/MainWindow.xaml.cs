@@ -154,7 +154,7 @@ public partial class MainWindow : Window
         [
             NavigationCommand("Open Dashboard", "Live CPU, GPU, RAM, drive, and network readings.", () => NavigateToPage(DashboardPage, DashboardNav)),
             NavigationCommand("Open Optimizer", "Review the Balanced and High performance Windows power plans.", () => NavigateToPage(OptimizerPage, OptimizerNav)),
-            NavigationCommand("Open Tweaks", "Review Windows settings and clearly described SleepOS actions.", () => NavigateToPage(TweaksPage, TweaksNav)),
+            NavigationCommand("Open SleepOS tweaks", "Adjust SleepOS performance, refresh, motion, and appearance settings.", () => NavigateToPage(TweaksPage, TweaksNav)),
             NavigationCommand("Open Games & processes", "View the games recognized by SleepOS.", () => NavigateToPage(GamesPage, GamesNav)),
             NavigationCommand("Open Hardware center", "View real hardware details reported by Windows.", () => NavigateToPage(HardwarePage, HardwareNav)),
             NavigationCommand("Open Network analyzer", "Measure ping, jitter, packet loss, and inspect adapters.", () => NavigateToPage(NetworkPage, NetworkNav)),

@@ -12,7 +12,6 @@ public interface IWindowsSystemService
     void OpenWindowsUpdateSettings();
     void OpenWindowsStorageSettings();
     void OpenWindowsPowerSettings();
-    void OpenWindowsTweakSettings(string tweakId);
 }
 
 public static class PowerProfileFormatter
@@ -131,49 +130,6 @@ public sealed class WindowsSystemService : IWindowsSystemService
 
     [SupportedOSPlatform("windows")]
     public void OpenWindowsPowerSettings() => OpenWindowsSettingsPage("ms-settings:powersleep");
-
-    [SupportedOSPlatform("windows")]
-    public void OpenWindowsTweakSettings(string tweakId)
-    {
-        var settingsPage = tweakId switch
-        {
-            "game-mode" => "ms-settings:gaming-gamemode",
-            "game-dvr" => "ms-settings:gaming-captures",
-            "game-bar" => "ms-settings:gaming-gamebar",
-            "animations" => "ms-settings:easeofaccess-visualeffects",
-            "transparency" => "ms-settings:colors",
-            "startup" => "ms-settings:startupapps",
-            "telemetry" => "ms-settings:privacy-feedback",
-            "ad-id" => "ms-settings:privacy-general",
-            "permissions" => "ms-settings:privacy",
-            "dns" or "adapter-info" => "ms-settings:network-status",
-            _ => null
-        };
-
-        if (settingsPage is not null)
-        {
-            OpenWindowsSettingsPage(settingsPage);
-            return;
-        }
-
-        if (tweakId is "hidden-files" or "file-extensions")
-        {
-            var process = global::System.Diagnostics.Process.Start(new global::System.Diagnostics.ProcessStartInfo
-            {
-                FileName = "control.exe",
-                Arguments = "folders",
-                UseShellExecute = true
-            });
-            if (process is null)
-            {
-                throw new InvalidOperationException("Windows could not open File Explorer Options.");
-            }
-
-            return;
-        }
-
-        throw new InvalidOperationException($"No Windows settings action is defined for '{tweakId}'.");
-    }
 
     private static void OpenWindowsSettingsPage(string pageUri)
     {

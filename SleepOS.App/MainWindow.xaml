@@ -410,7 +410,7 @@
                                     Click="Tweaks_Click" Margin="0,0,0,5">
                                 <StackPanel Orientation="Horizontal">
                                     <TextBlock Text="&#xE70F;" Style="{StaticResource NavIcon}"/>
-                                    <TextBlock Text="Tweaks"/>
+                                    <TextBlock Text="SleepOS tweaks"/>
                                 </StackPanel>
                             </Button>
                             <Button x:Name="GamesNav" Style="{StaticResource NavButton}"
@@ -782,66 +782,123 @@
                     <TabItem x:Name="TweaksPage">
                         <ScrollViewer VerticalScrollBarVisibility="Auto" Background="{DynamicResource BackgroundBrush}">
                             <StackPanel Margin="30,28,30,34">
-                                <TextBlock Text="Windows Tweaks" Foreground="{DynamicResource TextBrush}" FontSize="28" FontWeight="Bold"/>
-                                <TextBlock Text="Understand each option before changing it. The buttons below tell you exactly where they go."
+                                <TextBlock Text="SleepOS tweaks" Foreground="{DynamicResource TextBrush}" FontSize="28" FontWeight="Bold"/>
+                                <TextBlock Text="Tune SleepOS itself: its refresh behavior, performance mode, motion, and appearance."
                                            Foreground="{DynamicResource MutedBrush}" FontSize="13" Margin="0,7,0,18"/>
                                 <Border Style="{StaticResource HeroCard}" Margin="0,0,0,18">
                                     <StackPanel>
-                                        <TextBlock Text="What happens when I click?"
+                                        <TextBlock Text="Controls for this app"
                                                    Foreground="{DynamicResource TextBrush}" FontSize="16" FontWeight="SemiBold"/>
-                                        <TextBlock Text="Windows setting buttons open the relevant Windows page; you review and apply the change there. DNS cache and Explorer are direct SleepOS actions and run only when clicked."
+                                        <TextBlock Text="Every option on this page changes SleepOS preferences only. They are saved locally and do not open or modify operating-system settings."
                                                    Foreground="{DynamicResource HeroSubtitleBrush}" TextWrapping="Wrap" Margin="0,8,0,0"/>
                                     </StackPanel>
                                 </Border>
-                                <ItemsControl ItemsSource="{Binding TweakCategories}">
-                                    <ItemsControl.ItemTemplate>
-                                        <DataTemplate>
-                                            <Border Style="{StaticResource CardStyle}" Margin="0,0,0,14">
-                                                <StackPanel>
-                                                    <TextBlock Text="{Binding Name}" Foreground="{DynamicResource TextBrush}"
-                                                               FontSize="17" FontWeight="SemiBold"/>
-                                                    <TextBlock Text="{Binding Description}" Foreground="{DynamicResource MutedBrush}"
-                                                               Margin="0,4,0,12"/>
-                                                    <ItemsControl ItemsSource="{Binding Tweaks}">
-                                                        <ItemsControl.ItemTemplate>
-                                                            <DataTemplate>
-                                                                <Border BorderBrush="{DynamicResource LineBrush}" BorderThickness="0,1,0,0"
-                                                                        Padding="0,11">
-                                                                    <Grid>
-                                                                        <Grid.ColumnDefinitions>
-                                                                            <ColumnDefinition Width="*"/>
-                                                                            <ColumnDefinition Width="Auto"/>
-                                                                        </Grid.ColumnDefinitions>
-                                                                        <StackPanel>
-                                                                            <TextBlock Text="{Binding Name}" Foreground="{DynamicResource TextBrush}"
-                                                                                       FontWeight="SemiBold"/>
-                                                                            <TextBlock Text="{Binding Description}" Foreground="{DynamicResource MutedBrush}"
-                                                                                       FontSize="11" TextWrapping="Wrap" Margin="0,3,12,0"/>
-                                                                        </StackPanel>
-                                                                        <StackPanel Grid.Column="1" VerticalAlignment="Center" MinWidth="190">
-                                                                            <TextBlock Text="{Binding ActionType}" Foreground="{DynamicResource AccentBrush}"
-                                                                                       FontSize="10" HorizontalAlignment="Right" Margin="0,0,0,5"/>
-                                                                            <Button Content="{Binding ActionLabel}" Style="{StaticResource ActionButton}"
-                                                                                    Command="{Binding DataContext.RunTweakCommand, RelativeSource={RelativeSource AncestorType=Window}}"
-                                                                                    CommandParameter="{Binding Id}"/>
-                                                                        </StackPanel>
-                                                                    </Grid>
-                                                                </Border>
-                                                            </DataTemplate>
-                                                        </ItemsControl.ItemTemplate>
-                                                    </ItemsControl>
-                                                    <Border Style="{StaticResource CardStyle}" Margin="0,4,0,0">
-                                                        <StackPanel>
-                                                            <TextBlock Text="Last action" Style="{StaticResource SectionTitle}" FontSize="16"/>
-                                                            <TextBlock Text="{Binding ActionStatus}" Foreground="{DynamicResource AccentBrush}"
-                                                                       TextWrapping="Wrap" Margin="0,8,0,0"/>
-                                                        </StackPanel>
-                                                    </Border>
-                                                </StackPanel>
-                                            </Border>
-                                        </DataTemplate>
-                                    </ItemsControl.ItemTemplate>
-                                </ItemsControl>
+                                <TextBlock Text="PERFORMANCE" Foreground="{DynamicResource MutedBrush}" FontSize="10"
+                                           FontWeight="Bold" Margin="2,0,0,10"/>
+                                <Border Style="{StaticResource CardStyle}" Margin="0,0,0,12">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel VerticalAlignment="Center">
+                                            <TextBlock Text="SleepOS performance mode" Foreground="{DynamicResource TextBrush}" FontWeight="SemiBold"/>
+                                            <TextBlock Text="{Binding PerformanceModeStatus}" Foreground="{DynamicResource MutedBrush}"
+                                                       FontSize="11" TextWrapping="Wrap" Margin="0,4,12,0"/>
+                                        </StackPanel>
+                                        <ComboBox Grid.Column="1" Width="150" Style="{StaticResource SleepOSComboBox}"
+                                                  ItemsSource="{Binding PerformanceModeOptions}"
+                                                  SelectedItem="{Binding PerformanceMode, Mode=TwoWay}"/>
+                                    </Grid>
+                                </Border>
+                                <Border Style="{StaticResource CardStyle}" Margin="0,0,0,12">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="Auto"/>
+                                            <RowDefinition Height="Auto"/>
+                                        </Grid.RowDefinitions>
+                                        <StackPanel Grid.Row="0" VerticalAlignment="Center" Margin="0,0,0,12">
+                                            <TextBlock Text="Automatic metrics refresh" Foreground="{DynamicResource TextBrush}" FontWeight="SemiBold"/>
+                                            <TextBlock Text="{Binding AutoRefreshStatus}" Foreground="{DynamicResource MutedBrush}" FontSize="11" Margin="0,4,0,0"/>
+                                        </StackPanel>
+                                        <Button Grid.Row="0" Grid.Column="2" Content="Toggle" Style="{StaticResource ActionButton}"
+                                                Command="{Binding ToggleAutoRefreshCommand}" Margin="8,0,0,12"/>
+                                        <StackPanel Grid.Row="1" VerticalAlignment="Center">
+                                            <TextBlock Text="Refresh interval" Foreground="{DynamicResource TextBrush}" FontWeight="SemiBold"/>
+                                            <TextBlock Text="How often SleepOS reads system metrics when refresh is on."
+                                                       Foreground="{DynamicResource MutedBrush}" FontSize="11" Margin="0,4,0,0"/>
+                                        </StackPanel>
+                                        <ComboBox Grid.Row="1" Grid.Column="1" Width="74" Margin="0,0,8,0"
+                                                  Style="{StaticResource SleepOSComboBox}"
+                                                  ItemsSource="{Binding MetricsRefreshOptions}"
+                                                  SelectedItem="{Binding MetricsRefreshSeconds, Mode=TwoWay}"/>
+                                        <TextBlock Grid.Row="1" Grid.Column="2" Text="seconds" Foreground="{DynamicResource MutedBrush}"
+                                                   VerticalAlignment="Center"/>
+                                    </Grid>
+                                </Border>
+                                <TextBlock Text="APP EXPERIENCE" Foreground="{DynamicResource MutedBrush}" FontSize="10"
+                                           FontWeight="Bold" Margin="2,8,0,10"/>
+                                <Border Style="{StaticResource CardStyle}" Margin="0,0,0,12">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel VerticalAlignment="Center">
+                                            <TextBlock Text="SleepOS motion" Foreground="{DynamicResource TextBrush}" FontWeight="SemiBold"/>
+                                            <TextBlock Text="{Binding PageAnimationsStatus}" Foreground="{DynamicResource MutedBrush}"
+                                                       FontSize="11" Margin="0,4,0,0"/>
+                                        </StackPanel>
+                                        <Button Grid.Column="1" Content="Toggle" Style="{StaticResource ActionButton}"
+                                                Command="{Binding TogglePageAnimationsCommand}"/>
+                                    </Grid>
+                                </Border>
+                                <Border Style="{StaticResource CardStyle}" Margin="0,0,0,12">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel VerticalAlignment="Center">
+                                            <TextBlock Text="Color mode" Foreground="{DynamicResource TextBrush}" FontWeight="SemiBold"/>
+                                            <TextBlock Text="Choose how SleepOS looks." Foreground="{DynamicResource MutedBrush}"
+                                                       FontSize="11" Margin="0,4,0,0"/>
+                                        </StackPanel>
+                                        <ComboBox Grid.Column="1" Width="140" Style="{StaticResource SleepOSComboBox}"
+                                                  ItemsSource="{Binding ColorModeOptions}"
+                                                  SelectedItem="{Binding ColorMode, Mode=TwoWay}"/>
+                                    </Grid>
+                                </Border>
+                                <Border Style="{StaticResource CardStyle}" Margin="0,0,0,12">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel VerticalAlignment="Center">
+                                            <TextBlock Text="Accent color" Foreground="{DynamicResource TextBrush}" FontWeight="SemiBold"/>
+                                            <TextBlock Text="Set the highlight color used throughout SleepOS."
+                                                       Foreground="{DynamicResource MutedBrush}" FontSize="11" Margin="0,4,0,0"/>
+                                        </StackPanel>
+                                        <ComboBox Grid.Column="1" Width="140" Style="{StaticResource SleepOSComboBox}"
+                                                  ItemsSource="{Binding AccentThemeOptions}"
+                                                  SelectedItem="{Binding AccentTheme, Mode=TwoWay}"/>
+                                    </Grid>
+                                </Border>
+                                <Border Style="{StaticResource CardStyle}">
+                                    <StackPanel>
+                                        <TextBlock Text="Refresh now" Foreground="{DynamicResource TextBrush}" FontWeight="SemiBold"/>
+                                        <TextBlock Text="Update the readings displayed inside SleepOS."
+                                                   Foreground="{DynamicResource MutedBrush}" FontSize="11" Margin="0,4,0,10"/>
+                                        <Button Content="Refresh system readings" Style="{StaticResource ActionButton}"
+                                                HorizontalAlignment="Left" Command="{Binding RefreshMetricsCommand}"/>
+                                    </StackPanel>
+                                </Border>
                             </StackPanel>
                         </ScrollViewer>
                     </TabItem>
