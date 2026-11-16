@@ -332,8 +332,8 @@
         </Style>
     </Window.Resources>
 
-    <Border Background="{DynamicResource BackgroundBrush}" BorderBrush="{DynamicResource LineBrush}"
-            BorderThickness="1" CornerRadius="18">
+    <Border x:Name="WindowFrame" Background="{DynamicResource BackgroundBrush}" BorderBrush="{DynamicResource LineBrush}"
+            BorderThickness="1" CornerRadius="18" ClipToBounds="True" SizeChanged="WindowFrame_SizeChanged">
         <Grid>
             <Grid.RowDefinitions>
                 <RowDefinition Height="58"/>
@@ -470,7 +470,7 @@
 
                 <TabControl x:Name="MainPages" Grid.Column="1" SelectedIndex="0" Style="{StaticResource PageTabs}">
                     <TabItem x:Name="DashboardPage">
-                        <ScrollViewer VerticalScrollBarVisibility="Auto" Background="{DynamicResource BackgroundBrush}">
+                        <ScrollViewer VerticalScrollBarVisibility="Hidden" Background="{DynamicResource BackgroundBrush}">
                             <StackPanel Margin="30,28,30,34">
                                 <Border Style="{StaticResource HeroCard}" Margin="0,0,0,18">
                                     <Grid ClipToBounds="True">
@@ -592,7 +592,7 @@
                     </TabItem>
 
                     <TabItem x:Name="CarePage">
-                        <ScrollViewer VerticalScrollBarVisibility="Auto" Background="{DynamicResource BackgroundBrush}">
+                        <ScrollViewer VerticalScrollBarVisibility="Hidden" Background="{DynamicResource BackgroundBrush}">
                             <StackPanel Margin="30,28,30,34">
                                 <TextBlock Text="PC care" Foreground="{DynamicResource TextBrush}" FontSize="28" FontWeight="Bold"/>
                                 <TextBlock Text="Review safe cleanup recommendations and open official Windows maintenance settings."
@@ -704,7 +704,7 @@
                     </TabItem>
 
                     <TabItem x:Name="OptimizerPage">
-                        <ScrollViewer VerticalScrollBarVisibility="Auto" Background="{DynamicResource BackgroundBrush}">
+                        <ScrollViewer VerticalScrollBarVisibility="Hidden" Background="{DynamicResource BackgroundBrush}">
                             <StackPanel Margin="30,28,30,34">
                                 <TextBlock Text="Optimizer" Foreground="{DynamicResource TextBrush}" FontSize="28" FontWeight="Bold"/>
                                 <TextBlock Text="Choose one of SleepOS's two Windows power-plan options. No other tweaks or FPS boost are promised."
@@ -780,7 +780,7 @@
                     </TabItem>
 
                     <TabItem x:Name="TweaksPage">
-                        <ScrollViewer VerticalScrollBarVisibility="Auto" Background="{DynamicResource BackgroundBrush}">
+                        <ScrollViewer VerticalScrollBarVisibility="Hidden" Background="{DynamicResource BackgroundBrush}">
                             <StackPanel Margin="30,28,30,34">
                                 <TextBlock Text="SleepOS tweaks" Foreground="{DynamicResource TextBrush}" FontSize="28" FontWeight="Bold"/>
                                 <TextBlock Text="Tune SleepOS itself: its refresh behavior, performance mode, motion, and appearance."
@@ -904,7 +904,7 @@
                     </TabItem>
 
                     <TabItem x:Name="GamesPage">
-                        <ScrollViewer VerticalScrollBarVisibility="Auto" Background="{DynamicResource BackgroundBrush}">
+                        <ScrollViewer VerticalScrollBarVisibility="Hidden" Background="{DynamicResource BackgroundBrush}">
                             <StackPanel Margin="30,28,30,34">
                                 <TextBlock Text="Games &amp; processes" Foreground="{DynamicResource TextBrush}" FontSize="28" FontWeight="Bold"/>
                                 <TextBlock Text="Only recognized running game processes are listed. Other processes are shown separately."
@@ -965,7 +965,7 @@
                     </TabItem>
 
                     <TabItem x:Name="ProcessPage">
-                        <ScrollViewer VerticalScrollBarVisibility="Auto" Background="{DynamicResource BackgroundBrush}">
+                        <ScrollViewer VerticalScrollBarVisibility="Hidden" Background="{DynamicResource BackgroundBrush}">
                             <StackPanel Margin="30,28,30,34">
                                 <Border Style="{StaticResource HeroCard}" Margin="0,0,0,18">
                                     <Grid>
@@ -1090,7 +1090,7 @@
                     </TabItem>
 
                     <TabItem x:Name="HardwarePage">
-                        <ScrollViewer VerticalScrollBarVisibility="Auto" Background="{DynamicResource BackgroundBrush}">
+                        <ScrollViewer VerticalScrollBarVisibility="Hidden" Background="{DynamicResource BackgroundBrush}">
                             <StackPanel Margin="30,28,30,34">
                                 <Border Style="{StaticResource HeroCard}" Margin="0,0,0,18">
                                     <Grid>
@@ -1163,7 +1163,7 @@
                     </TabItem>
 
                     <TabItem x:Name="NetworkPage">
-                        <ScrollViewer VerticalScrollBarVisibility="Auto" Background="{DynamicResource BackgroundBrush}">
+                        <ScrollViewer VerticalScrollBarVisibility="Hidden" Background="{DynamicResource BackgroundBrush}">
                             <StackPanel Margin="30,28,30,34">
                                 <Border Style="{StaticResource HeroCard}" Margin="0,0,0,18">
                                     <StackPanel>
@@ -1334,7 +1334,7 @@
                     </TabItem>
 
                     <TabItem x:Name="SettingsPage">
-                        <ScrollViewer VerticalScrollBarVisibility="Auto" Background="{DynamicResource BackgroundBrush}">
+                        <ScrollViewer VerticalScrollBarVisibility="Hidden" Background="{DynamicResource BackgroundBrush}">
                             <StackPanel Margin="30,28,30,34">
                                 <TextBlock Text="Settings" Foreground="{DynamicResource TextBrush}" FontSize="28" FontWeight="Bold"/>
                                 <TextBlock Text="Personalize the look and a few app behaviors. Preferences are stored locally on this PC."

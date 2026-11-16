@@ -35,6 +35,17 @@ public partial class MainWindow : Window
         }
     }
 
+    private void WindowFrame_SizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        if (sender is Border border)
+        {
+            border.Clip = new RectangleGeometry(
+                new Rect(0, 0, border.ActualWidth, border.ActualHeight),
+                border.CornerRadius.TopLeft,
+                border.CornerRadius.TopLeft);
+        }
+    }
+
     private void MinimizeWindow(object sender, RoutedEventArgs e)
     {
         WindowState = WindowState.Minimized;
