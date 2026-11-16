@@ -1,0 +1,25 @@
+﻿<Application x:Class="SleepOS.App.App"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:local="clr-namespace:SleepOS.App"
+             Startup="OnStartup">
+    <Application.Resources>
+        <SolidColorBrush x:Key="SleepOSBackground" Color="#0B0B0F"/>
+        <SolidColorBrush x:Key="SleepOSCard" Color="#15151D"/>
+        <SolidColorBrush x:Key="SleepOSBorder" Color="#292936"/>
+        <SolidColorBrush x:Key="SleepOSAccent" Color="#A855F7"/>
+        <SolidColorBrush x:Key="SleepOSText" Color="#F2F2F7"/>
+        <SolidColorBrush x:Key="SleepOSMuted" Color="#A1A1AA"/>
+        <Style x:Key="SleepOSCardStyle" TargetType="Border">
+            <Setter Property="Background" Value="#15151D"/>
+            <Setter Property="BorderBrush" Value="#292936"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="CornerRadius" Value="16"/>
+            <Setter Property="Effect">
+                <Setter.Value>
+                    <DropShadowEffect BlurRadius="12" ShadowDepth="0" Color="#A855F7" Opacity="0.08"/>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </Application.Resources>
+</Application>

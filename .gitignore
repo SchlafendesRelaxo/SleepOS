@@ -1,0 +1,10 @@
+**/bin/
+**/obj/
+.vs/
+**/*.user
+**/*.suo
+
+SleepOS-Releases*/
+SleepOS-Release*.zip
+SleepOS-UpdateAssets*.zip
+SleepOS-BrowserDuplicateTabs*.zip

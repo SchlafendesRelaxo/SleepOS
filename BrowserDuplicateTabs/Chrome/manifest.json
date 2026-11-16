@@ -1,0 +1,11 @@
+{
+  "manifest_version": 3,
+  "name": "SleepOS Duplicate Tabs",
+  "version": "1.0.0",
+  "description": "Find duplicate web tabs and close only the ones you select.",
+  "permissions": ["tabs"],
+  "action": {
+    "default_title": "SleepOS Duplicate Tabs",
+    "default_popup": "popup.html"
+  }
+}

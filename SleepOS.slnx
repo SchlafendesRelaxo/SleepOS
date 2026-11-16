@@ -1,0 +1,12 @@
+<Solution>
+  <Project Path="SleepOS.App/SleepOS.App.csproj" />
+  <Project Path="SleepOS.Core/SleepOS.Core.csproj" />
+  <Project Path="SleepOS.Games/SleepOS.Games.csproj" />
+  <Project Path="SleepOS.Monitoring/SleepOS.Monitoring.csproj" />
+  <Project Path="SleepOS.Optimizer/SleepOS.Optimizer.csproj" />
+  <Project Path="SleepOS.Overlay/SleepOS.Overlay.csproj" />
+  <Project Path="SleepOS.Settings/SleepOS.Settings.csproj" />
+  <Project Path="SleepOS.System/SleepOS.System.csproj" />
+  <Project Path="SleepOS.Tests/SleepOS.Tests.csproj" />
+  <Project Path="SleepOS.Updater/SleepOS.Updater.csproj" />
+</Solution>

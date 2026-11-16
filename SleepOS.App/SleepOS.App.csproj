@@ -1,0 +1,30 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseWPF>true</UseWPF>
+    <StartupObject>SleepOS.App.Program</StartupObject>
+    <Version>1.0.3</Version>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.0" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="9.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Logging" Version="9.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\SleepOS.Core\SleepOS.Core.csproj" />
+    <ProjectReference Include="..\SleepOS.System\SleepOS.System.csproj" />
+    <ProjectReference Include="..\SleepOS.Optimizer\SleepOS.Optimizer.csproj" />
+    <ProjectReference Include="..\SleepOS.Monitoring\SleepOS.Monitoring.csproj" />
+    <ProjectReference Include="..\SleepOS.Games\SleepOS.Games.csproj" />
+    <ProjectReference Include="..\SleepOS.Overlay\SleepOS.Overlay.csproj" />
+    <ProjectReference Include="..\SleepOS.Settings\SleepOS.Settings.csproj" />
+    <ProjectReference Include="..\SleepOS.Updater\SleepOS.Updater.csproj" />
+  </ItemGroup>
+
+</Project>

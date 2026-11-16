@@ -1,0 +1,45 @@
+name: Build and publish SleepOS release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Test solution
+        run: dotnet test SleepOS.slnx -c Release
+
+      - name: Install Velopack CLI
+        shell: pwsh
+        run: dotnet tool install vpk --tool-path "$env:RUNNER_TEMP\vpk" --version 1.2.161
+
+      - name: Build installer and update packages
+        shell: pwsh
+        run: |
+          $version = $env:GITHUB_REF_NAME.TrimStart('v')
+          $publishDir = Join-Path $env:RUNNER_TEMP 'SleepOSPublish'
+          $releaseDir = Join-Path $env:RUNNER_TEMP 'SleepOSReleases'
+
+          dotnet publish 'SleepOS.App\SleepOS.App.csproj' -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:Version=$version -o $publishDir
+          if ($LASTEXITCODE -ne 0) { throw 'SleepOS publish failed.' }
+
+          & (Join-Path $env:RUNNER_TEMP 'vpk\vpk.exe') pack --packId SleepOS --packTitle SleepOS --packVersion $version --packDir $publishDir --mainExe SleepOS.App.exe --runtime win-x64 --channel win --outputDir $releaseDir
+          if ($LASTEXITCODE -ne 0) { throw 'Velopack packaging failed.' }
+
+          Rename-Item -LiteralPath (Join-Path $releaseDir 'SleepOS-win-Setup.exe') -NewName 'SleepOS-Setup.exe'
+          $assets = Get-ChildItem $releaseDir -File | ForEach-Object { $_.FullName }
+          gh release create $env:GITHUB_REF_NAME $assets --title "SleepOS $version" --generate-notes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

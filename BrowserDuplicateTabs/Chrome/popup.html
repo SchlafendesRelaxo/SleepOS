@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SleepOS Duplicate Tabs</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <main>
+    <header>
+      <span class="eyebrow">SLEEPOS</span>
+      <h1>Duplicate tabs</h1>
+      <p>Matches the same page address and tab title. Browser settings and local files are skipped.</p>
+    </header>
+    <div class="actions">
+      <button id="scan" class="secondary" type="button">Scan tabs</button>
+      <button id="close" class="primary" type="button" disabled>Close selected (0)</button>
+    </div>
+    <p id="status" role="status" aria-live="polite">Scan when you're ready. Nothing is closed automatically.</p>
+    <ul id="results" aria-label="Duplicate tabs"></ul>
+    <footer>Tabs stay on your device. Pinned tabs cannot be selected for closing.</footer>
+  </main>
+  <script src="popup.js"></script>
+</body>
+</html>
